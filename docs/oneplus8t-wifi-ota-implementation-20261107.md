@@ -61,3 +61,11 @@ SHA-256：`4b752532fa5776c072da3c3f912867e9550be2a71ee91652b864b7c928b8bad5`
 OTA 需要在 recovery 中重新选择同一真实包，核对确认页版本和新引擎日志，并确认是否通过原失败点。完整刷包是分区写入操作，应与用户测试安排一起进行，不自动从正常系统启动引擎。日志应在重启后仍可从 op2 的 skyward/current 取得。
 
 上次已验证密码解密的镜像仍为 `~/skyward-work/out/skyward-kebab-20261107-gatekeeper.img`（SHA-256 `6d7dc5684e239a71bc1f2f7667b708a7da665e0a951cab944a84b23afcadaa67`）；本轮没有覆盖设备上的恢复版本。
+
+## 用户授权后的部署
+
+用户随后明确要求继续刷入。再次确认正常系统网络 ADB 目标为 KB2000 / 50a390b0、当前槽 `_a`，将 recovery_a（`/dev/block/sda16`，104857600 字节）完整备份至设备 `/data/local/tmp/skyward-recovery-a-before-wifi-ota.img`，并取回 `~/skyward-work/backups/20261107-wifi-ota/recovery_a-before.img`。设备与主机备份哈希均为上述 gatekeeper 镜像的 `6d7dc568…cadaa67`。
+
+传入新镜像后验证设备文件哈希，使用 dd + fsync 写入 recovery_a，再直接计算分区 SHA-256，结果与候选镜像的 `4b752532…b8bad5` 完全一致。随后 `adb -s 192.168.144.228:5555 reboot recovery` 返回 0，网络 ADB 转为 offline。没有操作 recovery_b 或另一台 USB 手机。回执在 `~/skyward-work/backups/20261107-wifi-ota/deployment.json`。
+
+写入和重启命令已验证；恢复界面、解密、Wi-Fi 和实际 OTA 安装等待用户设备端测试，不能由网络 ADB 断开推断已成功进入 recovery。
