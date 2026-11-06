@@ -30,7 +30,9 @@ firmware = [
     # The retained recovery kernel has Oplus's flat INI path and no
     # MULTI_IF_NAME prefix for its built-in wlan driver.
     { name = "wlan/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/qca6390/WCNSS_qcom_cfg.ini" },
-    { name = "wlan/qca_cld/wlan_mac.bin", partition = "persist", path = "qca6390/wlan_mac.bin" },
+    # Stock init already mounts persist as ext4 here. Reuse that mount;
+    # probing/mounting its block device again can fail before reaching ext4.
+    { name = "wlan/qca_cld/wlan_mac.bin", path = "/mnt/vendor/persist/qca6390/wlan_mac.bin" },
 ]
 interface = "wlan0"
 supplicant = "/vendor/bin/hw/wpa_supplicant"
