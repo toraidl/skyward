@@ -136,8 +136,16 @@ fn main() -> Result<()> {
                 .with_context(|| format!("{} is not in the ramdisk", paths::PROP_DEFAULT))?
                 .data;
             let mut props = without(stock_props, &BUILD_VERSION);
-            props.extend_from_slice(b"\nro.secure=0\nro.adb.secure=0\nro.debuggable=1\nro.ota.allow_downgrade=true\n");
+            props.extend_from_slice(OPEN_RECOVERY);
             rd.replace(paths::PROP_DEFAULT, props)?;
+            // OPPO's and OnePlus's recoveries load this one ahead of
+            // `prop.default`, and a read-only property cannot be set twice:
+            // the first file to set adb's authorization decides it.
+            if let Some(e) = rd.find(paths::SECURE_PROP) {
+                let mut secure = without(&e.data, &SECURE_NAMES);
+                secure.extend_from_slice(OPEN_RECOVERY);
+                rd.replace(paths::SECURE_PROP, secure)?;
+            }
             img.ramdisk = rd.encode()?;
             let bytes = img.to_bytes()?;
             write(&out, &img, &avb::footed(&bytes, "recovery", size, &Sha256::digest(&bytes))?)
@@ -217,6 +225,13 @@ fn partition_size(stock: &Path) -> Result<usize> {
 /// they say the wrong one, so they are left out here for the recovery to
 /// fill in from the installed system once it has that mounted.
 const BUILD_VERSION: [&str; 3] = ["ro.build.version.release", "ro.build.version.security_patch", "ro.vendor.build.security_patch"];
+
+/// The properties that make the recovery's adb a root shell any computer
+/// may reach, and that let a package install over a newer build.
+const OPEN_RECOVERY: &[u8] = b"\nro.secure=0\nro.adb.secure=0\nro.debuggable=1\nro.ota.allow_downgrade=true\n";
+
+/// The properties a secure property file sets.
+const SECURE_NAMES: [&str; 4] = ["ro.secure", "ro.adb.secure", "ro.debuggable", "ro.ota.allow_downgrade"];
 
 /// The scheduling profiles a recovery's programs look up by name. A
 /// recovery's cgroup setup mounts no controllers, so of all a system's

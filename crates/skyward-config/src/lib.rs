@@ -19,6 +19,11 @@ pub mod ramdisk {
     pub const RECOVERY: &str = "system/bin/recovery";
     /// The first property file init loads in recovery mode.
     pub const PROP_DEFAULT: &str = "prop.default";
+    /// A property file OPPO's and OnePlus's recoveries load before
+    /// `prop.default`, which says a recovery is secure and asks adb for
+    /// authorization. Its read-only properties are set before anything
+    /// later can change them, so they are set here too.
+    pub const SECURE_PROP: &str = "secure.prop";
     /// The scheduling profiles libprocessgroup reads.
     pub const TASK_PROFILES: &str = "system/etc/task_profiles.json";
     /// The init rules that set up file transfer's USB function.
