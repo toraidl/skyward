@@ -21,6 +21,10 @@ pub struct Mounts {
     pub partitions: Vec<Mounted>,
     /// Damaged metadata copies in super that their backups stood in for.
     pub damaged: Vec<String>,
+    /// Partitions that could not be mounted, and why. A phone's super holds
+    /// partitions that are not file systems at all, and one of them must not
+    /// keep the rest - or the work that runs after mounting - from happening.
+    pub skipped: Vec<String>,
 }
 
 /// Where a logical partition goes in recovery. System goes to /mnt/system,
@@ -139,17 +143,20 @@ pub fn mount_partitions(slot: Slot) -> Result<Mounts> {
     };
 
     let shown = mounted_partitions(slot)?;
-    let mut mounts = Mounts { partitions: Vec::new(), damaged: md.damaged.clone() };
+    let mut mounts = Mounts { partitions: Vec::new(), damaged: md.damaged.clone(), skipped: Vec::new() };
     for p in slot_partitions(&md, slot) {
         if let Some(m) = shown.iter().find(|m| m.partition == p.name) {
             mounts.partitions.push(m.clone());
             continue;
         }
         let mounted = match through.map(|s| Ok::<_, anyhow::Error>((s, s.live(p)?))).transpose()? {
-            Some((s, Some(status))) => mount_snapshot(s, &md, &devices, p, &status, slot)?,
-            _ => map_and_mount(p, &devices, slot)?,
+            Some((s, Some(status))) => mount_snapshot(s, &md, &devices, p, &status, slot),
+            _ => map_and_mount(p, &devices, slot),
         };
-        mounts.partitions.push(mounted);
+        match mounted {
+            Ok(mounted) => mounts.partitions.push(mounted),
+            Err(e) => mounts.skipped.push(format!("{}: {e:#}", p.name)),
+        };
     }
     Ok(mounts)
 }
