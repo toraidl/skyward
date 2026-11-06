@@ -69,7 +69,18 @@ fn bytes(p: &Partition) -> u64 {
 /// Map partition `p` from super read-only with device-mapper and mount it
 /// over its point. A device that does not mount is removed again.
 fn map_and_mount(p: &Partition, devices: &[(u32, u32)], slot: Slot) -> Result<Mounted> {
-    let device = dm::create(&p.name, &targets(p, devices), true)?;
+    // init's own first stage maps the slot's logical partitions from super
+    // before a recovery service runs, and gives them these very names. Its
+    // table is the one this would load, so the device it made is used as it
+    // is: asking for the name again is refused with EBUSY, which used to
+    // stop every later partition from being mounted.
+    let (device, ours) = match dm::create(&p.name, &targets(p, devices), true) {
+        Ok(device) => (device, true),
+        Err(e) => match dm::status(&p.name) {
+            Ok(Some((_, minor))) => (PathBuf::from(format!("/dev/block/dm-{minor}")), false),
+            _ => return Err(e),
+        },
+    };
     let mount_point = mount_point(base(p, slot));
     let mounted = (|| -> Result<String> {
         fs::create_dir_all(&mount_point).with_context(|| format!("create {}", mount_point.display()))?;
@@ -77,6 +88,8 @@ fn map_and_mount(p: &Partition, devices: &[(u32, u32)], slot: Slot) -> Result<Mo
     })();
     match mounted {
         Ok(filesystem) => Ok(Mounted { partition: p.name.clone(), device, mount_point, filesystem }),
+        // Only a device this run made is removed again.
+        Err(e) if !ours => Err(e),
         Err(e) => Err(match dm::remove(&p.name) {
             Ok(()) => e,
             Err(r) => e.context(format!("removing {} afterwards failed too: {r:#}", p.name)),
