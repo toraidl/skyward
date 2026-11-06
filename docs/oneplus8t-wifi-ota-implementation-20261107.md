@@ -119,3 +119,13 @@ OTA 需要在 recovery 中重新选择同一真实包，核对确认页版本和
 提交 `c764bc5`。原厂 daemon 的 27 个 ELF 传递依赖审计无缺库、无未解析强符号，报告 cnss-dependency-audit.json。24 项配置测试和目录脚本语法检查通过。新镜像 `~/skyward-work/out/skyward-kebab-20261107-wifi-cnss.img`，SHA-256 `57a5de86b042a574d391ca79930136666a22c9d0f805230d8a324a8e880bb8f2`；相对已部署 QRTR 版本仅 device.toml 改变，其他 ramdisk 条目和 kernel/second/DTBO/DTB 一致，支持资产及 AVB NONE/hash 验证通过。
 
 已将 recovery_a 备份到 `~/skyward-work/backups/20261107-wifi-cnss/recovery_a-before.img`，主机和设备备份 SHA-256 均为 `33eef4ddffa71727df3f5cfc0b8eb2c98d9cf03429c5c7db77ef94cda79fc21a`。确认同一 KB2000 / 50a390b0、槽 `_a`，校验传输镜像后 dd + fsync 写入 recovery_a，分区读回与新镜像一致。随后 reboot recovery 命令返回 0，回执为同目录 deployment.json。用户态客户端存活、固件内存准备、wlan0 和实际扫描仍待下一轮实机验收。
+
+## CNSS 版本解密回归：账号解析导致安全服务未启动
+
+用户报告本版解密失效，随后恢复系统连接并要求自行取日志。日志保存于 `~/skyward-work/cnss-decrypt-result-20261107/current/`。recovery.log 明确显示目录准备脚本执行成功，但紧接着 `devices not brought up: /vendor/bin/cnss-daemon: the phone has no account named inet`。此后所有解密尝试均报 `no keymaster 4.0 or 4.1 service is registered`。本轮证据说明启动顺序在 CNSS 身份解析处中断，Keymaster 还未被启动；没有证据证明密钥损坏，也未证实是目录或挂载占用导致。最初的挂载占用方向已被具体日志排除为本轮直接原因。
+
+修正固定 Android 账号表，补 inet=3003、net_admin=3005，两者与本地 Android android_filesystem_config.h 的 AID_INET / AID_NET_ADMIN 定义核对一致（提交 `78530d7`）。另把 hwservicemanager、qseecomd、Keymaster、Gatekeeper、boot control 保持原先的安全服务顺序，之后才启动 QRTR、目录准备及 CNSS（提交 `7c729c9`），使后续无线初始化失败不再阻止这些安全服务启动。未移除已定位的无线客户端要求，也未格式化或清理用户数据。
+
+本机实际 vendor passwd/group 已取回，用修正后的固定账号表逐项核对全部 8 个服务的用户和组，无未解析名字，并验证 Keymaster / Gatekeeper 排在 CNSS 前；记录为 account-preflight.json。现有 sys/config 测试 35+24 项通过，Android arm64 release 编译通过。新镜像 `~/skyward-work/out/skyward-kebab-20261107-cnss-accounts.img`，SHA-256 `41d2aa073ee51f3877f1b303ee7cce6efd087d07e473a3ec1b4f1fc5e7b3ef13`。最终 cpio 与本版二进制、配置相符，相对出问题的 CNSS 镜像仅 recovery 程序及 device.toml 改变，其他 ramdisk 条目与 kernel/second/DTBO/DTB 不变，支持资产和 AVB NONE/hash 校验通过。
+
+已完整备份 recovery_a 至 `~/skyward-work/backups/20261107-cnss-accounts/recovery_a-before.img`，主机与设备备份 SHA-256 均为 `57a5de86b042a574d391ca79930136666a22c9d0f805230d8a324a8e880bb8f2`。确认同一 KB2000 / 50a390b0、槽 `_a`，传输校验后 dd + fsync 写入 recovery_a，分区读回与修正版哈希一致。随后 reboot recovery 返回 0；回执为同目录 deployment.json。密码解密恢复及 Wi-Fi 后续进展仍须本次 recovery 实机日志验证，本轮不将编译与写入成功记作解密成功。
