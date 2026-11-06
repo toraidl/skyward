@@ -22,7 +22,12 @@ status_bar_left_inset = 189
 # CNSS that the filesystem is ready; never borrow a module from another build.
 [wlan]
 modules = []
-writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+# fs_ready starts CNSS calibration. The built-in HDD driver itself loads
+# only when /dev/wlan receives ON; its handler copies three bytes.
+writes = [
+    { path = "/sys/kernel/cnss/fs_ready", value = "1" },
+    { path = "/dev/wlan", value = "ON\n" },
+]
 firmware = [
     # Stock recovery DT does not enable qcom,converged-dt. CNSS therefore
     # requests flat names even though this slot's modem stores them below
