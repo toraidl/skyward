@@ -80,3 +80,7 @@ SHA-256：`1babc80c5ae448207b78c188f7440c6dcddd0b69564f8e0ebc624c0f29ceb498`。�
 ```sh
 target/debug/skyward-preview /tmp/kebab-preview --home --config devices/kebab.toml --lang en-US
 ```
+
+## 用户授权后的部署
+
+用户随后明确授权刷入并直接重启 recovery。已备份当时的成功版本（哈希 `6c5323bb…`）到主机和手机，核对空 BCB、设备身份与槽位后，将候选写入 recovery_a；整分区读回哈希与 `1babc80c…` 候选一致，随后执行 `adb reboot recovery`，命令成功返回。启动界面、解密和挖孔效果等待用户试机反馈。部署回执与备份位于 `~/skyward-work/backups/20261107-followup/`。
