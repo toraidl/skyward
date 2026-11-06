@@ -234,20 +234,19 @@ fn command(s: &Service, who: &Credentials) -> Command {
 /// the `mounted` partitions, so they keep working once those partitions
 /// are written over, and give the mount points the files are on. The
 /// locked mappings stay for the rest of the recovery's life.
-pub fn pin(services: &[Service], mounted: &[Mounted]) -> Result<Vec<PathBuf>> {
+pub fn pin(programs: &[String], mounted: &[Mounted]) -> Result<Vec<PathBuf>> {
     let mut files = BTreeSet::new();
-    // A program run once has ended, and one between restarts has nothing in
-    // memory to keep either.
-    for s in services.iter().filter(|s| !s.oneshot) {
-        let Some(pid) = running(&s.path) else { continue };
+    // Programs between restarts have nothing in memory to keep.
+    for path in programs {
+        let Some(pid) = running(path) else { continue };
         let process = Process::new(pid as i32).with_context(|| format!("open process {pid}"))?;
-        for map in process.maps().with_context(|| format!("read the mappings of {}", s.path))? {
+        for map in process.maps().with_context(|| format!("read the mappings of {path}"))? {
             if let MMapPath::Path(p) = map.pathname {
                 files.insert(p);
             }
         }
-        for fd in process.fd().with_context(|| format!("read the files {} has open", s.path))? {
-            if let FDTarget::Path(p) = fd.with_context(|| format!("read a file {} has open", s.path))?.target {
+        for fd in process.fd().with_context(|| format!("read the files {path} has open"))? {
+            if let FDTarget::Path(p) = fd.with_context(|| format!("read a file {path} has open"))?.target {
                 files.insert(p);
             }
         }

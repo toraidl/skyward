@@ -692,7 +692,7 @@ fn install_asked(cfg: &DeviceConfig, app: &App, pending: Pending) -> Result<Inst
             mount::mount_ro(Path::new(&fstab::device(&cache)?), at)?;
         }
     }
-    Installer::asked(pending.package, pending.retry, detach(cfg.services.clone()), install_options(app))
+    Installer::asked(pending.package, pending.retry, detach(cfg), install_options(app))
 }
 
 /// Where a reboot rescue asked for goes: the target, and whether it is
@@ -956,11 +956,16 @@ fn set_slot(slot: skyward_vab::Slot) -> Result<skyward_vab::BootSlots, String> {
 /// What has to happen before an update writes over the installed system's
 /// partitions: the files the phone's own programs run from stay in memory,
 /// and the booted slot's partitions come off.
-fn detach(services: Vec<Service>) -> Detach {
+fn detach(cfg: &DeviceConfig) -> Detach {
+    let mut programs: Vec<String> = cfg.services.iter().filter(|s| !s.oneshot).map(|s| s.path.clone()).collect();
+    // The supplicant belongs to the WLAN worker rather than the service
+    // supervisor, but its vendor executable and libraries need the same
+    // protection while an install releases the mounted system.
+    programs.extend(cfg.wlan.iter().map(|w| w.supplicant.clone()));
     Box::new(move || {
         let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
         let mounted = skyward_vab::mounted_partitions(slot)?;
-        let busy = services::pin(&services, &mounted)?;
+        let busy = services::pin(&programs, &mounted)?;
         skyward_vab::release_partitions(slot, &busy)
     })
 }
@@ -1179,12 +1184,12 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
         }
         Work::Sideload { .. } => {
             app.start_sideload();
-            installer = Some(Installer::start(detach(cfg.services.clone()), install_options(&app))?);
+            installer = Some(Installer::start(detach(cfg), install_options(&app))?);
             sideloading = true;
         }
         Work::Rescue => {
             app.start_rescue();
-            installer = Some(Installer::rescue(detach(cfg.services.clone()), install_options(&app))?);
+            installer = Some(Installer::rescue(detach(cfg), install_options(&app))?);
             sideloading = true;
         }
         Work::Update(update) => {
@@ -1927,7 +1932,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         if !withhold(&mut transfer, &mut app, now)? {
                             continue;
                         }
-                        installer = Some(Installer::start(detach(cfg.services.clone()), install_options(&app))?);
+                        installer = Some(Installer::start(detach(cfg), install_options(&app))?);
                         sideloading = true;
                     }
                     Effect::InstallFile(place, path) => {
@@ -1935,14 +1940,14 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         if !withhold(&mut transfer, &mut app, now)? {
                             continue;
                         }
-                        installer = Some(Installer::open(in_place(place, &path), detach(cfg.services.clone()), install_options(&app))?);
+                        installer = Some(Installer::open(in_place(place, &path), detach(cfg), install_options(&app))?);
                     }
                     Effect::InstallPath(path) => {
                         ensure!(installer.is_none(), "an installer is running already");
                         if !withhold(&mut transfer, &mut app, now)? {
                             continue;
                         }
-                        installer = Some(Installer::open(PathBuf::from(path), detach(cfg.services.clone()), install_options(&app))?);
+                        installer = Some(Installer::open(PathBuf::from(path), detach(cfg), install_options(&app))?);
                     }
                     Effect::Flash { partition, pick } => {
                         let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
@@ -2113,7 +2118,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                             parts,
                             device: cfg.device.codename.clone(),
                             skipped: backup::data_skipped(&cfg.backup.data_skipped),
-                            detach: detach(cfg.services.clone()),
+                            detach: detach(cfg),
                         };
                         backuper = Some(backup::Worker::start(backup::Task::Restore(task))?);
                         app.backup_started(true, place, true);
