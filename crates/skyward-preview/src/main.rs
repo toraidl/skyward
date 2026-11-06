@@ -128,7 +128,11 @@ fn main() -> Result<()> {
         eprintln!("axis {tag}: {min}..{max} (default {def})");
     }
 
-    let cfg = DeviceConfig::load(root.join("devices/nezha.toml"))?;
+    let config = match args.iter().position(|a| a == "--config") {
+        Some(k) => PathBuf::from(args.get(k + 1).ok_or_else(|| anyhow!("--config needs a path"))?),
+        None => root.join("devices/nezha.toml"),
+    };
+    let cfg = DeviceConfig::load(config)?;
     let (w, h) = (cfg.display.width, cfg.display.height);
     let ppd = cfg.display.density as f32 / 160.0;
     let light = Theme::light(w, h, ppd);
@@ -148,6 +152,24 @@ fn main() -> Result<()> {
     }
 
     let info = nezha(&cfg);
+    if args.iter().any(|a| a == "--home") {
+        let mut info = info;
+        if !cfg.device.model.is_empty() {
+            info.model = cfg.device.model.clone();
+        }
+        if cfg.device.codename != "nezha" {
+            info.os_version = None;
+        }
+        let mut app = opened(Screen::Home, w, h, ppd);
+        app.set_screen_corners(cfg.display.corner_radius as f32);
+        app.set_status_bar_left_inset(cfg.display.status_bar_left_inset as f32);
+        let mut canvas = Canvas::new(w, h);
+        app.compose(&mut canvas, &fonts, &info, CLOCK, 0);
+        let path = out.join("home.png");
+        write_png(&path, &canvas)?;
+        println!("wrote {}", path.display());
+        return Ok(());
+    }
     let pending = DeviceInfo { snapshot: SnapshotState::Snapshotted, ..info.clone() };
     let pattern = Data::Locked { user: 0, keys: Keys::Pattern, checking: false };
     // Whole pages, the way a long screenshot shows them. The About page's
@@ -1004,6 +1026,7 @@ fn main() -> Result<()> {
     for (name, screen, dark, act) in moments {
         let mut app = opened(screen, w, h, ppd);
         app.set_screen_corners(cfg.display.corner_radius as f32);
+        app.set_status_bar_left_inset(cfg.display.status_bar_left_inset as f32);
         app.state.dark = dark;
         app.frame(&fonts, &info);
         app.tick(0);
