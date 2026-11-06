@@ -16,9 +16,23 @@ mod android {
     const GET_FREE: u32 = 0x4C82;
     const CONFIGURE: u32 = 0x4C0A;
 
-    /// The device only ever reads. It stays pointed at the file until the
-    /// recovery ends, which is as long as anything mounted from it lasts.
+    /// The device only ever reads its backing file.
     const READ_ONLY: u32 = 1;
+    const AUTO_CLEAR: u32 = 4;
+
+    /// Hold the loop open while its filesystem is being mounted. After a
+    /// successful mount the mount holds it; after a failure closing this
+    /// handle releases the read-only binding instead of leaking a loop.
+    pub struct Device {
+        path: PathBuf,
+        _file: File,
+    }
+
+    impl Device {
+        pub fn path(&self) -> &Path {
+            &self.path
+        }
+    }
 
     /// Every field is a plain number or a run of bytes, so the request is
     /// made by zeroing it and filling in what matters.
@@ -50,7 +64,7 @@ mod android {
     /// Open `file` from `offset` for `length` bytes as a block device, and
     /// give its path. The device goes away once whatever is mounted from it
     /// is unmounted.
-    pub fn attach(file: &Path, offset: u64, length: u64) -> Result<PathBuf> {
+    pub fn attach(file: &Path, offset: u64, length: u64) -> Result<Device> {
         let backing = File::open(file).with_context(|| format!("open {}", file.display()))?;
         let control = File::open(CONTROL).with_context(|| format!("open {CONTROL}"))?;
         let number = unsafe { libc::ioctl(control.as_raw_fd(), GET_FREE as libc::Ioctl) };
@@ -67,11 +81,11 @@ mod android {
         config.fd = backing.as_raw_fd() as u32;
         config.info.offset = offset;
         config.info.size_limit = length;
-        config.info.flags = READ_ONLY;
+        config.info.flags = READ_ONLY | AUTO_CLEAR;
         if unsafe { libc::ioctl(device.as_raw_fd(), CONFIGURE as libc::Ioctl, &mut config) } < 0 {
             return Err(std::io::Error::last_os_error()).with_context(|| format!("point {} at {}", path.display(), file.display()));
         }
-        Ok(path)
+        Ok(Device { path, _file: device })
     }
 
     /// Where the kernel put the loop device it just handed out: Android

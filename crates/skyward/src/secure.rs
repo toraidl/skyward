@@ -207,7 +207,7 @@ fn bundle(name: &str) -> Result<Option<PathBuf>> {
     let (offset, length) = image(&file)?;
     let device = skyward_block::loopdev::attach(&file, offset, length)?;
     fs::create_dir_all(&at).with_context(|| format!("make {}", at.display()))?;
-    skyward_block::mount::mount_ro(&device, &at)?;
+    skyward_block::mount::mount_ro(device.path(), &at)?;
     Ok(Some(at))
 }
 
