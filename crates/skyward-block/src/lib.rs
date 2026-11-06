@@ -15,6 +15,33 @@ pub mod usb;
 
 pub const BY_NAME: &str = "/dev/block/by-name";
 
+/// Partitions the phone keeps once, which OnePlus's update engine still
+/// looks for under a slot's name. The stock recovery links both names to
+/// the partition as it mounts the file systems; without those links an
+/// update stops while it works out the devices it has to write.
+pub const SLOTLESS: [&str; 3] = ["mdm_oem_stanvbk", "mdm_oem_dycnvbk", "spunvm"];
+
+/// Give each slot a name for every partition the phone keeps once, as the
+/// stock recovery does, and answer how many names were made.
+pub fn link_slots(dir: impl AsRef<Path>) -> Result<usize> {
+    let dir = dir.as_ref();
+    let mut made = 0;
+    for name in SLOTLESS {
+        if !dir.join(name).exists() {
+            continue;
+        }
+        for slot in ["_a", "_b"] {
+            let link = dir.join(format!("{name}{slot}"));
+            match std::os::unix::fs::symlink(name, &link) {
+                Ok(()) => made += 1,
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => {}
+                Err(e) => return Err(e).with_context(|| format!("link {}", link.display())),
+            }
+        }
+    }
+    Ok(made)
+}
+
 /// A bootloader parameter such as `androidboot.slot_suffix`, from bootconfig
 /// or, on kernels without it, the command line. Root tools can rewrite the
 /// matching `ro.boot.*` properties; these files come from the kernel.
@@ -139,5 +166,18 @@ mod tests {
     fn parses_slot_from_bootconfig() {
         let line = "androidboot.slot_suffix = \"_a\"\nandroidboot.force_normal_boot = \"1\"";
         assert_eq!(find_kv(line, "androidboot.slot_suffix").as_deref(), Some("_a"));
+    }
+
+    #[test]
+    fn a_partition_kept_once_answers_to_both_slots() {
+        let dir = std::env::temp_dir().join(format!("skyward-slotless-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("spunvm"), b"x").unwrap();
+        assert_eq!(link_slots(&dir).unwrap(), 2);
+        assert_eq!(fs::read(dir.join("spunvm_a")).unwrap(), b"x");
+        assert_eq!(fs::read(dir.join("spunvm_b")).unwrap(), b"x");
+        // One already named is left alone rather than refused.
+        assert_eq!(link_slots(&dir).unwrap(), 0);
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

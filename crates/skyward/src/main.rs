@@ -493,6 +493,13 @@ fn load_modules(cfg: &DeviceConfig, names: &[String]) -> Result<Vec<PathBuf>> {
 fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
     let nodes = skyward_sys::ueventd::apply()?;
     skyward_sys::kmsg(&format!("{nodes} device nodes given the owner their phone describes"))?;
+    // OnePlus's update engine finds the partitions it writes by the name of
+    // the slot; the partitions this phone keeps once need a name in each.
+    match skyward_block::link_slots(skyward_block::BY_NAME) {
+        Ok(0) => {}
+        Ok(made) => skyward_sys::kmsg(&format!("{made} slot names given to partitions the phone keeps once"))?,
+        Err(e) => skyward_sys::kmsg(&format!("slot names not given: {e:#}"))?,
+    }
     // The installed system's own version tells the secure world which build
     // made the keys it is asked about. It is not what lets the secure world
     // run: a recovery whose kernel cannot read the installed system's file
