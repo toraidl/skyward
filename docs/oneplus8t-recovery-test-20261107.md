@@ -46,3 +46,7 @@
 构建清单：`~/skyward-work/out/skyward-kebab-20261107-decrypt-diag.manifest.json`。
 
 写入回执：`~/skyward-work/backups/20261107/write-recovery-a.log`。
+
+## 后续试机结果
+
+用户已报告解密成功。本轮 recovery 日志、界面截图和重启后读取到的 op2 日志对此提供了支持；详见 [成功后的日志复核](oneplus8t-success-followup-20261107.md)。本记录上文的“尚未验收”描述对应写入完成时的状态。
