@@ -1,0 +1,13 @@
+
+# Leave a snapshot of the boot on the persist partition. A recovery whose
+# port never comes up cannot be read over adb, and this is the only place a
+# failed boot can say what init and the kernel did.
+service skyward-diag /system/bin/sh /system/bin/skyward-diag.sh /mnt/vendor/persist/skyward-diag.txt 12
+    disabled
+    oneshot
+    user root
+    group root
+    seclabel u:r:recovery:s0
+
+on boot
+    start skyward-diag

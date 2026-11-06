@@ -65,6 +65,10 @@ enum Cmd {
         /// The monospaced typeface's licence, which goes with it.
         #[arg(long)]
         mono_license: PathBuf,
+        /// Leave a snapshot of the boot on the persist partition, for a
+        /// recovery whose port never comes up to be read over adb.
+        #[arg(long)]
+        diagnostics: bool,
         #[arg(long)]
         out: PathBuf,
     },
@@ -103,7 +107,7 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read(&kernel)?.kernel;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, binary, config, font, mono, mono_license, out } => {
+        Cmd::Recovery { stock, binary, config, font, mono, mono_license, diagnostics, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
             let mut rd = Ramdisk::decode(&img.ramdisk)?;
@@ -125,7 +129,12 @@ fn main() -> Result<()> {
                 rd.add(paths::TASK_PROFILES, 0o644, TASK_PROFILES.to_vec())?;
             }
             disable_stock_recovery_ui(&mut rd)?;
-            rd.add(paths::MTP_RC, 0o644, MTP_RC.to_vec())?;
+            let mut rules = MTP_RC.to_vec();
+            if diagnostics {
+                rd.add(paths::DIAG, 0o755, DIAG.to_vec())?;
+                rules.extend_from_slice(DIAG_RC);
+            }
+            rd.add(paths::MTP_RC, 0o644, rules)?;
             // On an unlocked device adbd keeps root when ro.secure is 0 and
             // lets any computer in without authorization when ro.adb.secure is
             // 0; init lets a later line of a property file override an earlier
@@ -242,6 +251,12 @@ const TASK_PROFILES: &[u8] = include_bytes!("task_profiles.json");
 /// The init rules that give the USB port file transfer beside adb, which a
 /// stock recovery does not offer.
 const MTP_RC: &[u8] = include_bytes!("mtp.rc");
+
+/// The program that leaves a snapshot of the boot on the persist partition.
+const DIAG: &[u8] = include_bytes!("diag.sh");
+
+/// The init rules that run that program as the recovery boots.
+const DIAG_RC: &[u8] = include_bytes!("diag.rc");
 
 /// The rc file that starts a recovery's services.
 const INIT_RC: &str = "system/etc/init/hw/init.rc";

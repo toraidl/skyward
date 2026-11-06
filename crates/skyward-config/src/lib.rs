@@ -28,6 +28,9 @@ pub mod ramdisk {
     pub const TASK_PROFILES: &str = "system/etc/task_profiles.json";
     /// The init rules that set up file transfer's USB function.
     pub const MTP_RC: &str = "system/etc/init/skyward-mtp.rc";
+    /// The program that leaves what init and the kernel said where a
+    /// computer can read it after the next boot.
+    pub const DIAG: &str = "system/bin/skyward-diag.sh";
 
     /// Whether the running root is Skyward's recovery ramdisk.
     pub fn in_recovery() -> bool {
