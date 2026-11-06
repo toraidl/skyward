@@ -14,8 +14,11 @@ abootimg-oxide = "0.5.2"
 anyhow = { workspace = true }
 clap = { version = "4.5.51", features = ["derive"] }
 cpio = "0.4.1"
+flate2 = "1.1.10"
+liblzma = "0.4.9"
 lz4_flex = "0.14.0"
 sha2 = "0.10.9"
+sha1 = "0.10.6"
 skyward-config = { path = "../skyward-config" }
 tempfile = "3.27.0"
 # Takes the stock recovery partition out of a full update package on its

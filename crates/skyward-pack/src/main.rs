@@ -164,7 +164,14 @@ fn take_stock_recovery(stock: &skyward_config::Stock, out: &Path) -> Result<()> 
     std::fs::create_dir_all(parent).with_context(|| format!("make {}", parent.display()))?;
     // Taken out beside where it goes, so it is moved there whole.
     let work = tempfile::Builder::new().prefix(".stock").tempdir_in(parent).with_context(|| format!("make a folder in {}", parent.display()))?;
-    let payload = unpayload::Payload::open_url(&stock.package).with_context(|| format!("open {}", stock.package))?;
+    // A port can be made from a full package already on the computer, the
+    // same bytes the phone maker serves but read from disk.
+    let payload = if stock.package.starts_with("http://") || stock.package.starts_with("https://") {
+        unpayload::Payload::open_url(&stock.package)
+    } else {
+        unpayload::Payload::open(Path::new(&stock.package))
+    }
+    .with_context(|| format!("open {}", stock.package))?;
     let options = unpayload::ExtractOptions { output_dir: work.path().to_path_buf(), partitions: vec![RECOVERY.into()], ..Default::default() };
     let report = |event: unpayload::Event<'_>| match event {
         unpayload::Event::Started { partitions } => {
@@ -247,13 +254,15 @@ fn write(out: &Path, img: &BootImage, bytes: &[u8]) -> Result<()> {
 
 fn list(image: &Path) -> Result<()> {
     let img = BootImage::read(image)?;
-    let h = &img.header;
     println!(
-        "header v{}  kernel {} bytes  ramdisk {} bytes  {:?}",
-        h.header_version(),
+        "header v{}  kernel {} bytes  ramdisk {} bytes  second {} bytes  recovery DTBO {} bytes  DTB {} bytes  {:?}",
+        img.header_version(),
         img.kernel.len(),
         img.ramdisk.len(),
-        h.osversionpatch
+        img.second.len(),
+        img.recovery_dtbo.len(),
+        img.dtb.len(),
+        img.osversionpatch()
     );
     if img.ramdisk.is_empty() {
         return Ok(());
