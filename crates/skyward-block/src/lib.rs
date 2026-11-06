@@ -15,6 +15,11 @@ pub mod usb;
 
 pub const BY_NAME: &str = "/dev/block/by-name";
 
+/// The same partitions under the name the phone's own programs use, which
+/// is a different directory: the kernel makes that one through the
+/// bootdevice link, while the recovery makes its own above.
+pub const BOOT_BY_NAME: &str = "/dev/block/bootdevice/by-name";
+
 /// Partitions the phone keeps once, which OnePlus's update engine still
 /// looks for under a slot's name. The stock recovery links both names to
 /// the partition as it mounts the file systems; without those links an

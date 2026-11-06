@@ -495,10 +495,17 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
     skyward_sys::kmsg(&format!("{nodes} device nodes given the owner their phone describes"))?;
     // OnePlus's update engine finds the partitions it writes by the name of
     // the slot; the partitions this phone keeps once need a name in each.
-    match skyward_block::link_slots(skyward_block::BY_NAME) {
-        Ok(0) => {}
-        Ok(made) => skyward_sys::kmsg(&format!("{made} slot names given to partitions the phone keeps once"))?,
-        Err(e) => skyward_sys::kmsg(&format!("slot names not given: {e:#}"))?,
+    // The update engine reads the phone's own directory, not the one the
+    // recovery made, so both get the names.
+    let mut named = 0;
+    for dir in [skyward_block::BY_NAME, skyward_block::BOOT_BY_NAME] {
+        match skyward_block::link_slots(dir) {
+            Ok(made) => named += made,
+            Err(e) => skyward_sys::kmsg(&format!("slot names not given under {dir}: {e:#}"))?,
+        }
+    }
+    if named > 0 {
+        skyward_sys::kmsg(&format!("{named} slot names given to partitions the phone keeps once"))?;
     }
     // The installed system's own version tells the secure world which build
     // made the keys it is asked about. It is not what lets the secure world
