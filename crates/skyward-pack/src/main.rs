@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 mod avb;
 mod image;
 mod ramdisk;
+mod update_engine;
 
 use image::BootImage;
 use ramdisk::Ramdisk;
@@ -60,6 +61,11 @@ enum Cmd {
         /// Fill a missing /system/bin/logd with a matching recovery binary.
         #[arg(long)]
         logd: Option<PathBuf>,
+        /// Recovery root containing a tested update_engine_sideload, linker64
+        /// and system/lib64. Bundle its dependencies privately, keeping the
+        /// stock libraries used by decryption unchanged. Requires readelf.
+        #[arg(long)]
+        update_engine_root: Option<PathBuf>,
         /// Fill a missing /system/lib64 dependency; repeat for each library.
         /// Existing ramdisk libraries are never overwritten.
         #[arg(long = "library")]
@@ -118,7 +124,7 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read_kernel(&kernel)?;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, kernel, binary, logd, libraries, config, font, mono, mono_license, diagnostics, out } => {
+        Cmd::Recovery { stock, kernel, binary, logd, update_engine_root, libraries, config, font, mono, mono_license, diagnostics, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
             if let Some(kernel) = kernel {
@@ -133,6 +139,9 @@ fn main() -> Result<()> {
             let read = |p: &PathBuf| std::fs::read(p).with_context(|| format!("read {}", p.display()));
             skyward_config::DeviceConfig::load(&config)?;
             rd.replace(paths::RECOVERY, read(&binary)?)?;
+            if let Some(root) = update_engine_root {
+                update_engine::bundle(&mut rd, &root)?;
+            }
             if let Some(logd) = &logd {
                 ensure!(rd.entries.iter().any(|e| e.name.ends_with(".rc") && String::from_utf8_lossy(&e.data).lines().any(|l| l.trim_start().starts_with("service logd "))), "the stock ramdisk declares no logd service");
                 rd.add("system/bin/logd", 0o755, support_elf(logd)?)?;
