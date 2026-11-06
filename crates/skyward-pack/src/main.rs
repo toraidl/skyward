@@ -124,6 +124,7 @@ fn main() -> Result<()> {
             if rd.find(paths::TASK_PROFILES).is_none() {
                 rd.add(paths::TASK_PROFILES, 0o644, TASK_PROFILES.to_vec())?;
             }
+            disable_stock_recovery_ui(&mut rd)?;
             rd.add(paths::MTP_RC, 0o644, MTP_RC.to_vec())?;
             // On an unlocked device adbd keeps root when ro.secure is 0 and
             // lets any computer in without authorization when ro.adb.secure is
@@ -241,6 +242,46 @@ const TASK_PROFILES: &[u8] = include_bytes!("task_profiles.json");
 /// The init rules that give the USB port file transfer beside adb, which a
 /// stock recovery does not offer.
 const MTP_RC: &[u8] = include_bytes!("mtp.rc");
+
+/// The rc file that starts a recovery's services.
+const INIT_RC: &str = "system/etc/init/hw/init.rc";
+
+/// OPPO's and OnePlus's stock recoveries run their own recovery UI as a
+/// critical service of init beside `/system/bin/recovery`, which Skyward
+/// replaces. It maps super's logical partitions and drives the screen of
+/// its own, so both it and Skyward would fight over them. Leave it
+/// disabled, and drop the action that would start it anyway.
+fn disable_stock_recovery_ui(rd: &mut Ramdisk) -> Result<()> {
+    const SERVICE: &str = "phoenix_recovery";
+    if rd.find(&format!("system/bin/{SERVICE}")).is_none() {
+        return Ok(());
+    }
+    let Some(entry) = rd.find(INIT_RC) else { return Ok(()) };
+    let text = String::from_utf8_lossy(&entry.data);
+    let lines: Vec<&str> = text.lines().collect();
+    let starts_action = format!("start {SERVICE}");
+    let service_line = format!("service {SERVICE} ");
+    let mut out = String::with_capacity(text.len());
+    let mut at = 0;
+    while at < lines.len() {
+        let line = lines[at];
+        at += 1;
+        if line.trim() == starts_action {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+        if !line.trim_start().starts_with(&service_line) {
+            continue;
+        }
+        // Whether the block already tells init not to start it.
+        let already = lines[at..].iter().take_while(|l| !l.trim().is_empty() && !l.starts_with("service ") && !l.starts_with("on ")).any(|l| l.trim() == "disabled");
+        if !already {
+            out.push_str("    disabled\n");
+        }
+    }
+    rd.replace(INIT_RC, out.into_bytes())
+}
 
 /// A property file without the lines that set any of `names`.
 fn without(props: &[u8], names: &[&str]) -> Vec<u8> {
