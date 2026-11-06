@@ -20,8 +20,12 @@ pub const BY_NAME: &str = "/dev/block/by-name";
 /// matching `ro.boot.*` properties; these files come from the kernel.
 pub fn boot_param(key: &str) -> Result<Option<String>> {
     for src in ["/proc/bootconfig", "/proc/cmdline"] {
-        match fs::read_to_string(src) {
-            Ok(s) => {
+        // A bootloader may append bytes that are not text to the command
+        // line, as OnePlus's does after its verified-boot key hash; only
+        // the tokens are read, so the rest is read leniently.
+        match fs::read(src) {
+            Ok(bytes) => {
+                let s = String::from_utf8_lossy(&bytes);
                 if let Some(v) = find_kv(&s, key) {
                     return Ok(Some(v));
                 }
