@@ -625,6 +625,11 @@ enum Line {
 /// Run update_engine on the package, telling the screen how far it is,
 /// and give its exit code.
 fn apply(ctx: &Context, update: &Update) -> Result<i32> {
+    // The update engine writes OnePlus's reserve entry into a file inside
+    // user data, so the file and the names that reach it come first.
+    if let Err(e) = crate::reserve::prepare() {
+        let _ = skyward_sys::kmsg(&format!("reserve.img not prepared: {e:#}"));
+    }
     let (status_read, status_write) = pipe(0)?;
     let status_fd = status_write.as_raw_fd();
     let mut command = std::process::Command::new(ota::PROGRAM);
