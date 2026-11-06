@@ -63,6 +63,58 @@ probe = "http://connectivitycheck.gstatic.com/generate_204"
 [partitions]
 mounted = ["metadata"]
 
+# The phone's hardware services, which the stock recovery starts only when
+# its own recovery binary sets a property as it decrypts. Skyward starts
+# them itself, in the order they depend on one another: the directory the
+# older kind registers with, the secure world's listener daemon, the key
+# service, the credential service and the boot control.
+[[service]]
+path = "/system/bin/hwservicemanager"
+libraries = ["/system/lib64"]
+ready_property = "hwservicemanager.ready"
+user = "root"
+groups = ["root"]
+
+# The daemon the secure world reaches back into Android through. Until its
+# listeners are registered, the secure world's apps, the key service among
+# them, cannot run.
+[[service]]
+path = "/system/bin/qseecomd"
+libraries = ["/system/lib64"]
+ready_property = "vendor.sys.listeners.registered"
+user = "root"
+groups = ["root"]
+
+# The key service, the only thing that can use the keys the phone wrapped
+# in hardware.
+[[service]]
+path = "/system/bin/android.hardware.keymaster@4.1-service-qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_hardware_service = "android.hardware.keymaster@4.1::IKeymasterDevice/default"
+user = "system"
+groups = ["system", "drmrpc"]
+
+# The credential service, which is what the secure world has check the
+# secret behind a screen lock.
+[[service]]
+path = "/vendor/bin/hw/android.hardware.gatekeeper@1.0-service-qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_hardware_service = "android.hardware.gatekeeper@1.0::IGatekeeper/default"
+user = "root"
+groups = ["root"]
+
+# The boot control, which says which slot the bootloader starts next and
+# switches it. It follows the credential services: the phone is usable
+# without it.
+[[service]]
+path = "/vendor/bin/hw/android.hardware.boot@1.1-service"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_hardware_service = "android.hardware.boot@1.1::IBootControl/default"
+user = "root"
+groups = ["root"]
+
+# Start optional networking only after the credential and boot services.
+# A wireless setup error must not prevent Keymaster/Gatekeeper startup.
 # CNSS discovers the WLAN firmware's QMI server through the QRTR name
 # server. MHI can enter mission mode without it, but firmware-ready then
 # times out. Match this vendor build's core init service and credentials.
@@ -106,55 +158,6 @@ libraries = ["/vendor/lib64", "/system/lib64"]
 user = "system"
 groups = ["system", "inet", "net_admin", "wifi"]
 capabilities = ["NET_ADMIN"]
-
-# The phone's hardware services, which the stock recovery starts only when
-# its own recovery binary sets a property as it decrypts. Skyward starts
-# them itself, in the order they depend on one another: the directory the
-# older kind registers with, the secure world's listener daemon, the key
-# service, the credential service and the boot control.
-[[service]]
-path = "/system/bin/hwservicemanager"
-libraries = ["/system/lib64"]
-ready_property = "hwservicemanager.ready"
-user = "root"
-groups = ["root"]
-
-# The daemon the secure world reaches back into Android through. Until its
-# listeners are registered, the secure world's apps, the key service among
-# them, cannot run.
-[[service]]
-path = "/system/bin/qseecomd"
-libraries = ["/system/lib64"]
-ready_property = "vendor.sys.listeners.registered"
-user = "root"
-groups = ["root"]
-
-# The key service, the only thing that can use the keys the phone wrapped
-# in hardware.
-[[service]]
-path = "/system/bin/android.hardware.keymaster@4.1-service-qti"
-libraries = ["/system/lib64", "/vendor/lib64"]
-ready_hardware_service = "android.hardware.keymaster@4.1::IKeymasterDevice/default"
-user = "system"
-groups = ["system", "drmrpc"]
-
-# The credential service, which is what the secure world has check the
-# secret behind a screen lock.
-[[service]]
-path = "/vendor/bin/hw/android.hardware.gatekeeper@1.0-service-qti"
-libraries = ["/system/lib64", "/vendor/lib64"]
-ready_hardware_service = "android.hardware.gatekeeper@1.0::IGatekeeper/default"
-user = "root"
-groups = ["root"]
-
-# The boot control, which says which slot the bootloader starts next and
-# switches it. It comes last: the phone is usable without it.
-[[service]]
-path = "/vendor/bin/hw/android.hardware.boot@1.1-service"
-libraries = ["/system/lib64", "/vendor/lib64"]
-ready_hardware_service = "android.hardware.boot@1.1::IBootControl/default"
-user = "root"
-groups = ["root"]
 
 # The stock ColorOS 14 build the ColorOS 17 port for this phone is based
 # on. Its recovery partition is the stock one: unlike the port's own full
