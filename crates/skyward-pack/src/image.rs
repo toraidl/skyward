@@ -51,6 +51,13 @@ impl BootImage {
         if bytes.get(ARM64_MAGIC_OFFSET..ARM64_MAGIC_OFFSET + ARM64_MAGIC.len()) == Some(ARM64_MAGIC) {
             return Ok(bytes);
         }
+        // The kernel build can hand out Image.gz. The bootloader reads the
+        // compressed kernel with the format named by CONFIG_KERNEL_GZIP, so
+        // keep those bytes as they are rather than requiring a second copy
+        // of a kernel that will not fit beside a 100 MiB recovery ramdisk.
+        if bytes.get(..2) == Some(&[0x1f, 0x8b]) {
+            return Ok(bytes);
+        }
         let header = Header::parse(&mut abootimg_oxide::binrw::io::Cursor::new(&bytes))
             .with_context(|| format!("{} is neither a bare arm64 kernel nor a boot image", path.display()))?;
         section(&bytes, header.kernel_position(), header.kernel_size(), "kernel")
@@ -259,6 +266,15 @@ mod tests {
         let path = dir.path().join("Image");
         let mut image = vec![0u8; 4096];
         image[0x38..0x3c].copy_from_slice(b"ARM\x64");
+        fs::write(&path, &image).unwrap();
+        assert_eq!(BootImage::read_kernel(&path).unwrap(), image);
+    }
+
+    #[test]
+    fn a_compressed_kernel_is_kept_compressed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Image.gz");
+        let image = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0];
         fs::write(&path, &image).unwrap();
         assert_eq!(BootImage::read_kernel(&path).unwrap(), image);
     }
