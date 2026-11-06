@@ -67,8 +67,7 @@ impl Message {
     /// A run of bytes: the frame that says where they are, then an address
     /// for the bytes themselves.
     pub fn bytes(&mut self, value: &[u8]) {
-        let at = self.keep(value.to_vec());
-        self.framed(at, value.len(), value.len());
+        self.vector(value, value.len());
     }
 
     /// Text, which is a run of bytes with a terminator the count leaves
@@ -76,8 +75,45 @@ impl Message {
     pub fn text(&mut self, value: &str) {
         let mut raw = value.as_bytes().to_vec();
         raw.push(0);
-        let at = self.keep(raw);
-        self.framed(at, value.len(), value.len() + 1);
+        self.vector(&raw, value.len());
+    }
+
+    /// A value copied into the far side's room as it is, as a structure by
+    /// value is written: the number of bytes is the frame's own length.
+    pub fn value(&mut self, bytes: &[u8]) -> usize {
+        let at = self.keep(bytes.to_vec());
+        self.address(at, bytes.len(), None)
+    }
+
+    /// Bytes that are part of another value, at `offset` in it: what a
+    /// vector held in a structure is written as, the offside pointer
+    /// inside the structure naming them once the driver has moved them.
+    pub fn part(&mut self, bytes: &[u8], within: usize, offset: u64) -> usize {
+        let at = self.keep(bytes.to_vec());
+        self.part_at(at, bytes.len(), within, offset)
+    }
+
+    /// A vector as the phone's own code writes one: a frame saying where
+    /// its elements are and how many there are, then the elements.
+    pub fn vector(&mut self, elements: &[u8], count: usize) -> usize {
+        self.vector_parts(elements, count).1
+    }
+
+    /// The same vector, giving the frame's number and the elements' too,
+    /// for elements that hold vectors of their own.
+    pub fn vector_parts(&mut self, elements: &[u8], count: usize) -> (usize, usize) {
+        let at = self.keep(elements.to_vec());
+        let mut frame = [0u8; FRAME_BYTES];
+        frame[..8].copy_from_slice(&at.to_le_bytes());
+        frame[8..12].copy_from_slice(&(count as u32).to_le_bytes());
+        let frame_at = self.keep(frame.to_vec());
+        let frame = self.address(frame_at, FRAME_BYTES, None);
+        let part = self.part_at(at, elements.len(), frame, 0);
+        (frame, part)
+    }
+
+    fn part_at(&mut self, at: u64, length: usize, within: usize, offset: u64) -> usize {
+        self.address(at, length, Some((within, offset)))
     }
 
     /// Hold on to bytes the driver will read, and say where they are.
@@ -90,30 +126,19 @@ impl Message {
 
     /// The pair of addresses a run of bytes is written as: the frame, and
     /// then the bytes it points at.
-    fn framed(&mut self, at: u64, count: usize, length: usize) {
-        let mut frame = Vec::with_capacity(FRAME_BYTES);
-        frame.extend_from_slice(&at.to_le_bytes());
-        frame.extend_from_slice(&(count as u32).to_le_bytes());
-        // Whoever reads the frame does not free what it points at.
-        frame.extend_from_slice(&[0; 4]);
-        let frame_at = self.keep(frame);
-        let parent = self.address(frame_at, FRAME_BYTES, None);
-        self.address(at, length, Some(parent));
-    }
-
     /// Write an address among the values and say where it sits, which is
     /// how the driver finds it. The answer is which address this is, for
     /// the one pointing inside it to name.
-    fn address(&mut self, at: u64, length: usize, inside: Option<usize>) -> usize {
+    fn address(&mut self, at: u64, length: usize, inside: Option<(usize, u64)>) -> usize {
         let which = self.addresses.len();
         self.addresses.push(self.data.len() as u64);
         self.data.extend_from_slice(&ADDRESS.to_le_bytes());
         self.data.extend_from_slice(&inside.map_or(0, |_| INSIDE_ANOTHER).to_le_bytes());
         self.data.extend_from_slice(&at.to_le_bytes());
         self.data.extend_from_slice(&(length as u64).to_le_bytes());
-        self.data.extend_from_slice(&(inside.unwrap_or(0) as u64).to_le_bytes());
-        // The address inside the frame is the frame's first field.
-        self.data.extend_from_slice(&0u64.to_le_bytes());
+        // The parent's number, then where inside it these bytes sit.
+        self.data.extend_from_slice(&(inside.map_or(0, |(parent, _)| parent) as u64).to_le_bytes());
+        self.data.extend_from_slice(&inside.map_or(0, |(_, offset)| offset).to_le_bytes());
         self.pointed += (length as u64).next_multiple_of(WORD);
         which
     }
