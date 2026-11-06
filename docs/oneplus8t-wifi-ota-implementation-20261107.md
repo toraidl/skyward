@@ -77,3 +77,9 @@ OTA 需要在 recovery 中重新选择同一真实包，核对确认页版本和
 修正提交 `f328045`。产物 `~/skyward-work/out/skyward-kebab-20261107-wifi-ota-persist.img`，SHA-256 `f3ffd18cea18825dd1767f786e99bcab16818a8deeb5082b80ca1d8d91d0d7e6`。24 项既有配置测试、最终 cpio 内容核验及 AVB NONE/hash 验证通过。与刚部署的 Wi-Fi/OTA 镜像相比，只有 `skyward/device.toml` 内容改变，所有其他 ramdisk 条目以及 kernel、second、DTBO、DTB 一致。本次仅调整配置，无须重编译恢复程序。
 
 修正版尚未刷入：目标网络 ADB 显示 offline，唯一在线 USB 设备为另一台 PEDM00，未对其操作。需用户回到正常系统恢复 8T 网络 ADB 后继续部署。
+
+### persist 修正版部署与完整错误证据
+
+用户重启回正常系统后，已重新连上同一 KB2000 / 50a390b0（`_a`）。先保存上次 recovery 持久日志，再完整备份 recovery_a。新日志 `~/skyward-work/backups/20261107-wifi-persist/logs-before/recovery.log:28` 明确给出 `Device or resource busy (os error 16)`，同目录 status.txt:558 确认 persist 已挂载 ext4。因此重复挂载导致 EBUSY 已有本轮直接证据，不再只是静态推测。
+
+旧版备份 `~/skyward-work/backups/20261107-wifi-persist/recovery_a-before.img`，主机/设备 SHA-256 均为 `4b752532fa5776c072da3c3f912867e9550be2a71ee91652b864b7c928b8bad5`。修正版传入后验证哈希，dd + fsync 写 recovery_a，分区读回哈希为 `f3ffd18cea18825dd1767f786e99bcab16818a8deeb5082b80ca1d8d91d0d7e6`，与修正版一致。随后执行 `adb reboot recovery`，命令返回 0。回执在同一备份目录 deployment.json。Wi-Fi 后续启动、扫描、联网仍待 recovery 实测。
