@@ -129,3 +129,11 @@ OTA 需要在 recovery 中重新选择同一真实包，核对确认页版本和
 本机实际 vendor passwd/group 已取回，用修正后的固定账号表逐项核对全部 8 个服务的用户和组，无未解析名字，并验证 Keymaster / Gatekeeper 排在 CNSS 前；记录为 account-preflight.json。现有 sys/config 测试 35+24 项通过，Android arm64 release 编译通过。新镜像 `~/skyward-work/out/skyward-kebab-20261107-cnss-accounts.img`，SHA-256 `41d2aa073ee51f3877f1b303ee7cce6efd087d07e473a3ec1b4f1fc5e7b3ef13`。最终 cpio 与本版二进制、配置相符，相对出问题的 CNSS 镜像仅 recovery 程序及 device.toml 改变，其他 ramdisk 条目与 kernel/second/DTBO/DTB 不变，支持资产和 AVB NONE/hash 校验通过。
 
 已完整备份 recovery_a 至 `~/skyward-work/backups/20261107-cnss-accounts/recovery_a-before.img`，主机与设备备份 SHA-256 均为 `57a5de86b042a574d391ca79930136666a22c9d0f805230d8a324a8e880bb8f2`。确认同一 KB2000 / 50a390b0、槽 `_a`，传输校验后 dd + fsync 写入 recovery_a，分区读回与修正版哈希一致。随后 reboot recovery 返回 0；回执为同目录 deployment.json。密码解密恢复及 Wi-Fi 后续进展仍须本次 recovery 实机日志验证，本轮不将编译与写入成功记作解密成功。
+
+## OTA 第一步直接显示 100%：进度来源错误
+
+用户确认当前 recovery 可以联网，随后报告安装 OTA 时立即显示 `Step 1 of 3: writing the new system 100%`，且无法从界面判断是否仍在执行。源码确认 apply 将 FUSE 的 served 最远读取位置当作写入字节数；而 package::identify 先读取 ZIP 中央目录和尾部属性，FUSE 的最大读取位置会在引擎真正写入前抵达文件末尾。同时 status 处理只接 Step/Error，忽略了 OrangeFox sideload_main.cc:81 发出的 `set_progress %.2lf`。
+
+修正提交 `6d1ebef`：单独解析引擎 set_progress 的有限 [0,1] 数值，转换为万分比，apply 的 Writing 进度按该值计算；不再引用 FUSE 最远读取位置。仍依引擎校验日志和 Step 2/2 切换到验证、收尾阶段，安装完成必须以引擎结束结果判定。66 项已有安装测试通过，Android release 编译通过。此次仅修改和编译主机源码，未打包部署、未重启/停止设备或引擎，不能据此判断正在执行的 OTA 是否正常。
+
+本次只有另一台 PEDM00 USB ADB 在线；8T 正常系统的已知网络地址连接提示 No route to host。当前源码没有启用 TCP adbd 的配置或开关，Wi-Fi 联网不等于无线 ADB 已开启，未核实监听端口前不能承诺知道 IP 就能取到当前日志。已向用户更正此前遗漏的前提。安装页在 Updating/Scripting 状态拒绝返回，属于既有行为；不应因这个错误的百分比而强制重启，也不能把禁用取消视为引擎还在工作的证明。需当前日志/I/O 或最终完成结果才能确定现场状态。
