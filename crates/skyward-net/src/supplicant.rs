@@ -53,6 +53,33 @@ impl Security {
     pub fn joinable(self) -> bool {
         !matches!(self, Security::Wep | Security::Enterprise)
     }
+
+    /// The word a saved network writes this protection as.
+    pub fn name(self) -> &'static str {
+        match self {
+            Security::Open => "open",
+            Security::Owe => "owe",
+            Security::Wep => "wep",
+            Security::Psk => "psk",
+            Security::Sae => "sae",
+            Security::PskSae => "psk_sae",
+            Security::Enterprise => "enterprise",
+        }
+    }
+
+    /// The protection a saved network named, for one this build wrote.
+    pub fn from_name(name: &str) -> Option<Security> {
+        Some(match name {
+            "open" => Security::Open,
+            "owe" => Security::Owe,
+            "wep" => Security::Wep,
+            "psk" => Security::Psk,
+            "sae" => Security::Sae,
+            "psk_sae" => Security::PskSae,
+            "enterprise" => Security::Enterprise,
+            _ => return None,
+        })
+    }
 }
 
 /// An access point a scan found.

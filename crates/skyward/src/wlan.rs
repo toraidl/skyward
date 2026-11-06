@@ -9,6 +9,7 @@ use skyward_net::dhcp::{self, Kept, Lease};
 use skyward_net::http::Servers;
 use skyward_net::iface;
 use skyward_net::reach::{self, Reach};
+use skyward_net::saved::Saved;
 use skyward_net::supplicant::{self, Bss, Control, Event as Told, Security};
 use skyward_net::wlan::{self, Joined, Link, Next, Power, Stage, Traffic, Wlan};
 use std::fs;
@@ -33,6 +34,10 @@ const PARTITIONS: &str = "/skyward/wlan";
 
 /// The supplicant's settings, and the folder of its control socket.
 const HOME: &str = "/tmp/skyward-wlan";
+
+/// The network last joined, kept on the partition that outlives a boot so
+/// the phone rejoins it by itself after a restart.
+const SAVED: &str = "/mnt/vendor/persist/skyward/wifi.conf";
 
 /// The user the supplicant takes on as it starts, who has to be able to
 /// make its socket.
@@ -137,7 +142,7 @@ impl Worker {
                     let _ = told_tx.send(r);
                     signal(&rung);
                 };
-                let mut s = Station { cfg, modules, libraries, servers, state: Wlan::default(), running: None, back, tell: Box::new(tell) };
+                let mut s = Station { cfg, modules, libraries, servers, state: Wlan::default(), running: None, pending: None, back, tell: Box::new(tell) };
                 s.run(&inbox, &poked);
             })
             .context("start the WLAN thread")?;
@@ -244,6 +249,9 @@ struct Station {
     servers: Servers,
     state: Wlan,
     running: Option<Running>,
+    /// The network set up and waiting to connect, and the commands that
+    /// set it up, kept once it connects.
+    pending: Option<(Joined, Vec<String>)>,
     back: Back,
     tell: Box<dyn Fn(Report) + Send>,
 }
@@ -302,10 +310,14 @@ impl Station {
             }
             Command::Join { ssid, name, security, password } => {
                 self.unaddress();
+                self.pending = None;
                 let mut joined = Joined { ssid, name, security, stage: Stage::Joining };
-                if let Err(e) = self.join(&joined, &password) {
-                    let _ = skyward_sys::kmsg(&format!("joining {} failed: {e:#}", joined.name));
-                    joined.stage = Stage::Failed;
+                match self.join(&joined, &password) {
+                    Ok(commands) => self.pending = Some((joined.clone(), commands)),
+                    Err(e) => {
+                        let _ = skyward_sys::kmsg(&format!("joining {} failed: {e:#}", joined.name));
+                        joined.stage = Stage::Failed;
+                    }
                 }
                 self.state.joined = Some(joined);
             }
@@ -317,6 +329,8 @@ impl Station {
                     }
                 }
                 self.state.joined = None;
+                self.pending = None;
+                let _ = fs::remove_file(SAVED);
             }
         }
     }
@@ -331,6 +345,7 @@ impl Station {
             Ok(r) => {
                 self.running = Some(r);
                 self.state.power = Power::On;
+                self.restore();
                 self.command(Command::Scan);
             }
             Err(e) => {
@@ -393,17 +408,60 @@ impl Station {
         self.state.power = Power::Failed(format!("{e:#}"));
     }
 
-    fn join(&self, joined: &Joined, password: &str) -> Result<()> {
+    fn join(&self, joined: &Joined, password: &str) -> Result<Vec<String>> {
         let r = self.running.as_ref().context("the WLAN is off")?;
         r.control.order("REMOVE_NETWORK all")?;
         let id: u32 = r.control.ask("ADD_NETWORK")?.trim().parse().context("wpa_supplicant numbered the network with no number")?;
         // One the last scan did not see may hide its name, as one added by
         // hand may.
         let hidden = !r.found.iter().any(|b| b.ssid == joined.ssid);
-        for c in supplicant::network_commands(id, &joined.ssid, joined.security, password, hidden)? {
-            r.control.order(&c)?;
+        let commands = supplicant::network_commands(id, &joined.ssid, joined.security, password, hidden)?;
+        for c in &commands {
+            r.control.order(c)?;
         }
-        r.control.order(&format!("SELECT_NETWORK {id}"))
+        r.control.order(&format!("SELECT_NETWORK {id}"))?;
+        Ok(commands)
+    }
+
+    /// Keep the network just set up once it connects, so a later boot joins
+    /// it again without asking for its password.
+    fn remember(&self) {
+        let Some((joined, commands)) = &self.pending else { return };
+        let saved = Saved::of(joined, commands);
+        if let Err(e) = saved.write(Path::new(SAVED)) {
+            let _ = skyward_sys::kmsg(&format!("saving the network failed: {e:#}"));
+        }
+    }
+
+    /// Join the network kept by an earlier boot, if one was kept.
+    fn restore(&mut self) {
+        if self.state.joined.is_some() {
+            return;
+        }
+        let Ok(text) = fs::read_to_string(SAVED) else { return };
+        let Some(saved) = Saved::read(&text) else {
+            let _ = skyward_sys::kmsg(&format!("{SAVED} is not one this build wrote"));
+            return;
+        };
+        let Some(r) = &self.running else { return };
+        let joined = |stage: Stage| Joined { ssid: saved.ssid.clone(), name: saved.name.clone(), security: saved.security, stage };
+        let rejoin = (|| -> Result<()> {
+            r.control.order("REMOVE_NETWORK all")?;
+            let id: u32 = r.control.ask("ADD_NETWORK")?.trim().parse().context("wpa_supplicant numbered the network with no number")?;
+            for command in saved.renumber(id)? {
+                r.control.order(&command)?;
+            }
+            r.control.order(&format!("SELECT_NETWORK {id}"))
+        })();
+        match rejoin {
+            Ok(()) => {
+                let _ = skyward_sys::kmsg(&format!("joining the saved network {}", saved.name));
+                self.state.joined = Some(joined(Stage::Joining));
+            }
+            Err(e) => {
+                let _ = skyward_sys::kmsg(&format!("the saved network was not joined: {e:#}"));
+            }
+        }
     }
 
     /// Read what the supplicant has told.
@@ -447,7 +505,10 @@ impl Station {
         let Some(j) = &mut self.state.joined else { return };
         match j.on(told) {
             Next::Show => {}
-            Next::Address => self.ask_address(),
+            Next::Address => {
+                self.remember();
+                self.ask_address();
+            }
             Next::Unaddress => self.unaddress(),
             Next::Forget => {
                 if let Some(r) = &self.running {
