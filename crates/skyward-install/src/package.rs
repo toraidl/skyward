@@ -41,9 +41,10 @@ pub struct Update {
 }
 
 impl Update {
-    /// The version the package installs, as its build names it.
+    /// The user-facing version. ColorOS keeps its release name separately
+    /// from post-build-incremental, which may be just a numeric build ID.
     pub fn version(&self) -> Option<&str> {
-        self.metadata.get("post-build-incremental")
+        self.metadata.get("version_name").or_else(|| self.metadata.get("post-build-incremental"))
     }
 
     /// Whether the system it installs needs all user data erased before it
