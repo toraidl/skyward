@@ -107,3 +107,15 @@ OTA 需要在 recovery 中重新选择同一真实包，核对确认页版本和
 读取本机 qrtr-ns 和 libqrtr.so 做静态闭包核对，7 个 ELF 无缺库或强符号缺失，报告为该取证目录 qrtr-dependency-audit.json。24 项配置测试通过。候选 `~/skyward-work/out/skyward-kebab-20261107-wifi-qrtr.img`，SHA-256 `33eef4ddffa71727df3f5cfc0b8eb2c98d9cf03429c5c7db77ef94cda79fc21a`。最终解包核对相对上版仅 device.toml 改变，其他程序、库和 kernel/second/DTBO/DTB 一致；AVB NONE/hash 校验通过。
 
 已备份当前 recovery_a 至 `~/skyward-work/backups/20261107-wifi-qrtr/recovery_a-before.img`（SHA-256 `2d0031732c9a5daedb3377e25416a035d3a137742a44f9a45f00d1f41c4081ce`），确认同一 KB2000 / 50a390b0、槽 `_a` 后写入新镜像、fsync，分区读回哈希与新镜像完全一致。随后 reboot recovery 返回 0。部署回执为同目录 deployment.json。下一轮验收重点为 QRTR 名称服务存活、QMI server-arrive / FW ready、wlan0、supplicant PONG 和真实扫描。本轮没有证据证明这些后续行为已成功。
+
+## QRTR 修正后的证据：缺少第二个 WLFW 客户端
+
+重连同一 8T 后保存本次持久日志及手动导出的 `20261107-020215`，副本为 `~/skyward-work/wifi-qrtr-result-20261107/`。新 status.txt:527 确认 vendor_qrtr 身份的 qrtr-ns 正常运行。kernel.log:2890–2905 已从 WLFW server arriving 走到 `QMI WLFW service connected`、indication register、host capability；先前完全没有服务发现的问题已证实解除。当前停止在 `Number of clients is 2` 后，尚无 REQUEST_MEM / FW_MEM_READY。日志覆盖至约启动 50 秒，不把它当作本轮已经发生 40 秒超时的证据。
+
+源码 `cnss_init_control_params` 按 DT 的 cnss-daemon-support 设置 ENABLE_DAEMON_SUPPORT，`cnss_wlfw_host_cap_send_sync` 在该位存在时向固件声明两个客户端。该 recovery 进程表没有 cnss-daemon，正常 vendor init.wlan.qcom.rc:919–923 明确启动 `/system/vendor/bin/cnss-daemon -n -l`，user system、groups system inet net_admin wifi、NET_ADMIN。保留该固件/DT 的双客户端配置，补起用户态客户端，不改 quirks 或固件能力声明。
+
+额外核验实际 daemon 的启动路径：其 main 在 0x9b04 绑定 `/data/vendor/wifi/sockets/cnss_user_server`，绑定错误经 0x9b80 分支走失败路径；WLFW 注册从 0xa008 的 wlfw_start 开始，发生在该步骤之后。因此新增根身份 oneshot，仅创建缺失的 /data/vendor、wifi、sockets 目录，并给新建 Wi-Fi 目录原厂 wifi:wifi / 0770 权限；已有目录和校准文件不在脚本写入范围。/data 未挂载时这些目录位于 ramdisk，后续 /data 挂载会遮盖它们。随后按原厂 UID/组/能力启动 `/vendor/bin/cnss-daemon -n -l`。daemon 本身仍可能按原厂逻辑生成或更新校准缓存，需要后续日志验证，不声称其完全不写文件。
+
+提交 `c764bc5`。原厂 daemon 的 27 个 ELF 传递依赖审计无缺库、无未解析强符号，报告 cnss-dependency-audit.json。24 项配置测试和目录脚本语法检查通过。新镜像 `~/skyward-work/out/skyward-kebab-20261107-wifi-cnss.img`，SHA-256 `57a5de86b042a574d391ca79930136666a22c9d0f805230d8a324a8e880bb8f2`；相对已部署 QRTR 版本仅 device.toml 改变，其他 ramdisk 条目和 kernel/second/DTBO/DTB 一致，支持资产及 AVB NONE/hash 验证通过。
+
+已将 recovery_a 备份到 `~/skyward-work/backups/20261107-wifi-cnss/recovery_a-before.img`，主机和设备备份 SHA-256 均为 `33eef4ddffa71727df3f5cfc0b8eb2c98d9cf03429c5c7db77ef94cda79fc21a`。确认同一 KB2000 / 50a390b0、槽 `_a`，校验传输镜像后 dd + fsync 写入 recovery_a，分区读回与新镜像一致。随后 reboot recovery 命令返回 0，回执为同目录 deployment.json。用户态客户端存活、固件内存准备、wlan0 和实际扫描仍待下一轮实机验收。
