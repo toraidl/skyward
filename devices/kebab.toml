@@ -27,8 +27,10 @@ firmware = [
     { name = "qca6390/amss20.bin", partition = "modem", slotselect = true, filesystem = "vfat", path = "image/qca6390/amss20.bin" },
     { name = "qca6390/m3.bin", partition = "modem", slotselect = true, filesystem = "vfat", path = "image/qca6390/m3.bin" },
     { name = "qca6390/bdwlan.elf", partition = "modem", slotselect = true, filesystem = "vfat", path = "image/qca6390/bdwlan.elf" },
-    { name = "wlan/qca_cld/qca6390/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/qca6390/WCNSS_qcom_cfg.ini" },
-    { name = "wlan/qca_cld/qca6390/wlan_mac.bin", partition = "persist", path = "qca6390/wlan_mac.bin" },
+    # The retained recovery kernel has Oplus's flat INI path and no
+    # MULTI_IF_NAME prefix for its built-in wlan driver.
+    { name = "wlan/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/qca6390/WCNSS_qcom_cfg.ini" },
+    { name = "wlan/qca_cld/wlan_mac.bin", partition = "persist", path = "qca6390/wlan_mac.bin" },
 ]
 interface = "wlan0"
 supplicant = "/vendor/bin/hw/wpa_supplicant"
