@@ -493,8 +493,21 @@ fn load_modules(cfg: &DeviceConfig, names: &[String]) -> Result<Vec<PathBuf>> {
 fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
     let nodes = skyward_sys::ueventd::apply()?;
     skyward_sys::kmsg(&format!("{nodes} device nodes given the owner their phone describes"))?;
-    let props = skyward_info::installed_props(slot)?;
-    adopt_installed_version(&props)?;
+    // The installed system's own version tells the secure world which build
+    // made the keys it is asked about. It is not what lets the secure world
+    // run: a recovery whose kernel cannot read the installed system's file
+    // systems still has to bring the hardware services up, and the key
+    // service is one of them.
+    let props = match skyward_info::installed_props(slot) {
+        Ok(props) => props,
+        Err(e) => {
+            skyward_sys::kmsg(&format!("the installed system stays unread: {e:#}"))?;
+            Default::default()
+        }
+    };
+    if let Err(e) = adopt_installed_version(&props) {
+        skyward_sys::kmsg(&format!("the installed build stays unknown: {e:#}"))?;
+    }
     // Without logd the phone's own programs still run, and only what they
     // log is lost, so why it did not start goes to the kernel log.
     if let Some(logd) = &cfg.logd {
@@ -759,6 +772,9 @@ fn prepare(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
         Ok(mounts) => {
             for d in &mounts.damaged {
                 skyward_sys::kmsg(&format!("super: {d}"))?;
+            }
+            for s in &mounts.skipped {
+                skyward_sys::kmsg(&format!("super: not mounted, {s}"))?;
             }
             for m in &mounts.partitions {
                 skyward_sys::kmsg(&format!("mounted {} on {} ({})", m.partition, m.mount_point.display(), m.filesystem))?;
