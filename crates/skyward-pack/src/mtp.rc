@@ -12,7 +12,12 @@ on fs && property:sys.usb.configfs=1
     mkdir /dev/usb-ffs/mtp 0770 root root
     mount functionfs mtp /dev/usb-ffs/mtp rmode=0770,fmode=0660,uid=0,gid=0
 
-on property:sys.usb.config=mtp,adb && property:sys.usb.config_disable=0
+# The stock rules start adbd only for the bare "adb" configuration. A
+# recovery offering file transfer asks for "mtp,adb" instead, and its adbd
+# is then never started: with no adb function bound, sys.usb.ffs.ready never
+# becomes 1, init never writes the controller, and the port stays down
+# entirely. Nothing here sets sys.usb.config_disable.
+on property:sys.usb.config=mtp,adb
     start adbd
 
 on property:sys.usb.config=mtp,adb && property:sys.usb.ffs.ready=1 && property:sys.usb.ffs.mtp.ready=1 && property:sys.usb.configfs=1
