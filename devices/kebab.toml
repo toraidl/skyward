@@ -63,6 +63,17 @@ probe = "http://connectivitycheck.gstatic.com/generate_204"
 [partitions]
 mounted = ["metadata"]
 
+# CNSS discovers the WLAN firmware's QMI server through the QRTR name
+# server. MHI can enter mission mode without it, but firmware-ready then
+# times out. Match this vendor build's core init service and credentials.
+[[service]]
+path = "/vendor/bin/qrtr-ns"
+args = ["-f"]
+libraries = ["/vendor/lib64", "/system/lib64"]
+user = "vendor_qrtr"
+groups = ["vendor_qrtr"]
+capabilities = ["NET_BIND_SERVICE"]
+
 # The phone's hardware services, which the stock recovery starts only when
 # its own recovery binary sets a property as it decrypts. Skyward starts
 # them itself, in the order they depend on one another: the directory the
