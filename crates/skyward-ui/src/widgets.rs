@@ -751,11 +751,19 @@ fn blur_room(t: &Theme) -> f32 {
 pub fn big_title(t: &Theme, f: &Fonts, title: &str) -> Sprite {
     let m = &t.m;
     let pad = blur_room(t);
-    let w = Canvas::new(0, 0).text_width(&f.title, title, m.title_px);
+    let room = m.w as f32 - m.title_x * 2.0;
+    let mut px = m.title_px;
+    let mut w = Canvas::new(0, 0).text_width(&f.title, title, px);
+    // A title too long for the width it has is set smaller rather than run
+    // off the screen, which would hide what it names.
+    if w > room && room > 0.0 {
+        px = (px * room / w).max(m.title_px * 0.6);
+        w = Canvas::new(0, 0).text_width(&f.title, title, px);
+    }
     let (x, y) = (m.title_x - pad, m.title_top - pad);
-    let size = ((w + pad * 2.0).ceil() as u32, (m.title_px * 1.4 + pad * 2.0).ceil() as u32);
+    let size = ((w + pad * 2.0).ceil() as u32, (px * 1.4 + pad * 2.0).ceil() as u32);
     Sprite::capture(x, y, size.0, size.1, |c, dx, dy| {
-        c.text_top(&f.title, title, m.title_x + dx, m.title_top + dy, m.title_px, Rgba::rgb(0, 0, 0), None);
+        c.text_top(&f.title, title, m.title_x + dx, m.title_top + dy, px, Rgba::rgb(0, 0, 0), None);
     })
 }
 
@@ -764,7 +772,13 @@ pub fn big_title(t: &Theme, f: &Fonts, title: &str) -> Sprite {
 pub fn small_title(t: &Theme, f: &Fonts, title: &str) -> Sprite {
     let m = &t.m;
     let (px, pad) = (m.account_title_px, blur_room(t));
-    let w = Canvas::new(0, 0).text_width(&f.heading, title, px);
+    let room = m.w as f32 - m.title_x * 2.0;
+    let mut px = px;
+    let mut w = Canvas::new(0, 0).text_width(&f.heading, title, px);
+    if w > room && room > 0.0 {
+        px = (px * room / w).max(m.account_title_px * 0.6);
+        w = Canvas::new(0, 0).text_width(&f.heading, title, px);
+    }
     let h = px * 1.5;
     let (x, y) = ((m.w as f32 - w) / 2.0 - pad, m.back_cy - h / 2.0 - pad);
     Sprite::capture(x, y, (w + pad * 2.0).ceil() as u32, (h + pad * 2.0).ceil() as u32, |c, dx, dy| {
