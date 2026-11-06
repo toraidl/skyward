@@ -79,6 +79,7 @@ status() {
     # property maps hundreds of unrelated contexts and flooded the recovery
     # audit log with getprop denials on the OnePlus stock policy.
     for key in ro.boot.serialno ro.product.model ro.boot.slot_suffix \
+        ro.product.ab_ota_partitions service.adb.tcp.port \
         ro.build.version.release ro.build.version.security_patch ro.vendor.build.security_patch \
         hwservicemanager.ready vendor.sys.listeners.registered vendor.gatekeeper.disable_spu \
         logd.ready sys.usb.config sys.usb.state sys.usb.controller sys.usb.configfs \
@@ -91,6 +92,18 @@ status() {
     done
     echo '--- processes'
     ps -A -o USER,PID,PPID,NAME,ARGS
+    echo '--- adb TCP listener (5555)'
+    awk 'FNR == 1 || $2 ~ /:15B3$/ { print }' /proc/net/tcp /proc/net/tcp6
+    echo '--- OTA engine activity'
+    for pid in $(ps -A -o PID,ARGS | awk '/\/system\/skyward-update-engine\/update_engine_sideload/ { print $1 }'); do
+        case "$pid" in ''|*[!0-9]*) continue ;; esac
+        echo "engine pid $pid"
+        cat "/proc/$pid/status" "/proc/$pid/io" "/proc/$pid/wchan" "/proc/$pid/stack" 2>&1
+        for task in /proc/"$pid"/task/*; do
+            echo "$task"
+            cat "$task/comm" "$task/wchan" 2>&1
+        done
+    done
     echo '--- mounts'
     cat /proc/mounts
     echo '--- usb'
