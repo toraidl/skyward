@@ -1,3 +1,9 @@
+# The stock recovery program, which Skyward replaces, is what asks init
+# for adb on these phones; the stock rc only does so in the `fs` stage,
+# which a recovery never reaches. Ask for it as the recovery boots.
+on boot
+    setprop sys.usb.config adb
+
 # File transfer: an MTP function beside adb. Skyward serves the function
 # itself; once it has written the descriptors it sets sys.usb.ffs.mtp.ready,
 # and with adbd ready too, init binds the two together.
