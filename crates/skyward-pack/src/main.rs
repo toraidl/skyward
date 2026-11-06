@@ -162,6 +162,11 @@ fn main() -> Result<()> {
             }
             disable_stock_recovery_ui(&mut rd)?;
             let mut rules = MTP_RC.to_vec();
+            if device.adb.tcp_port.is_some() {
+                // Its TCP listener must start even when the USB gadget never
+                // binds. The port is set in the initial property files below.
+                rules.extend_from_slice(b"\non boot\n    start adbd\n");
+            }
             if logd.is_some() {
                 // Its stock service belongs to class core, while recovery
                 // starts class default. USB state must not decide whether
@@ -230,6 +235,9 @@ fn support_elf(path: &Path) -> Result<Vec<u8>> {
 
 fn configured_properties(device: &skyward_config::DeviceConfig) -> Vec<(&'static str, String)> {
     let mut properties = Vec::new();
+    if let Some(port) = device.adb.tcp_port {
+        properties.push(("service.adb.tcp.port", port.to_string()));
+    }
     if !device.partitions.ab_ota.is_empty() {
         properties.push(("ro.product.ab_ota_partitions", device.partitions.ab_ota.join(",")));
     }

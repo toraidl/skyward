@@ -6,6 +6,11 @@ ab = true
 soc = { hans = "骁龙®865 移动平台", hant = "Snapdragon® 865 行動平台", en = "Snapdragon® 865 Mobile Platform" }
 os_version_prop = "ro.build.version.ota"
 
+# Debug recovery: keep TCP ADB reachable after Wi-Fi comes up even with
+# this phone's USB connection unavailable. Does not change Android's adb.
+[adb]
+tcp_port = 5555
+
 [display]
 # The panel's own mode as the phone reports it: 1080 by 2400 at 480 dpi,
 # the 6.55-inch AMOLED of the KB2000.

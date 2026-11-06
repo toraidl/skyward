@@ -42,6 +42,8 @@ pub mod ramdisk {
 pub struct DeviceConfig {
     pub device: Device,
     #[serde(default)]
+    pub adb: Adb,
+    #[serde(default)]
     pub display: Display,
     #[serde(default)]
     pub modules: Modules,
@@ -81,6 +83,13 @@ pub struct DeviceConfig {
     /// The stock build the recovery is made on.
     #[serde(default)]
     pub stock: Option<Stock>,
+}
+
+/// Recovery-only network debugging. Disabled unless a device opts in.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+pub struct Adb {
+    #[serde(default)]
+    pub tcp_port: Option<u16>,
 }
 
 /// The stock build a recovery is made on: the phone maker's full update
@@ -505,6 +514,7 @@ impl DeviceConfig {
 
     pub fn parse(text: &str) -> Result<Self> {
         let cfg: DeviceConfig = toml::from_str(text).context("parse device config")?;
+        ensure!(cfg.adb.tcp_port != Some(0), "[adb] tcp_port must be between 1 and 65535");
         for log in &cfg.wipe.logs {
             let path = Path::new(log);
             let plain = path.components().all(|c| matches!(c, std::path::Component::RootDir | std::path::Component::Normal(_)));
