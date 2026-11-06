@@ -74,6 +74,39 @@ user = "vendor_qrtr"
 groups = ["vendor_qrtr"]
 capabilities = ["NET_BIND_SERVICE"]
 
+# cnss-daemon binds its user socket before it registers with WLFW. Before
+# /data is decrypted these missing directories live only in the ramdisk;
+# create them without changing an existing directory or calibration file.
+[[service]]
+path = "/system/bin/sh"
+args = ["-c", '''
+set -eu
+if [ ! -d /data/vendor ]; then
+    /system/bin/toybox mkdir -p /data/vendor
+    /system/bin/toybox chmod 0755 /data/vendor
+fi
+for directory in /data/vendor/wifi /data/vendor/wifi/sockets; do
+    if [ ! -d "$directory" ]; then
+        /system/bin/toybox mkdir "$directory"
+        /system/bin/toybox chown 1010:1010 "$directory"
+        /system/bin/toybox chmod 0770 "$directory"
+    fi
+done
+''']
+oneshot = true
+user = "root"
+groups = ["root"]
+
+# The recovery DT enables cnss-daemon-support: firmware waits for both the
+# kernel and userspace WLFW clients. Match the installed vendor's init rc.
+[[service]]
+path = "/vendor/bin/cnss-daemon"
+args = ["-n", "-l"]
+libraries = ["/vendor/lib64", "/system/lib64"]
+user = "system"
+groups = ["system", "inet", "net_admin", "wifi"]
+capabilities = ["NET_ADMIN"]
+
 # The phone's hardware services, which the stock recovery starts only when
 # its own recovery binary sets a property as it decrypts. Skyward starts
 # them itself, in the order they depend on one another: the directory the
