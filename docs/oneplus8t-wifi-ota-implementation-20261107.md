@@ -95,3 +95,15 @@ OTA 需要在 recovery 中重新选择同一真实包，核对确认页版本和
 24 项现有配置测试通过。新镜像 `~/skyward-work/out/skyward-kebab-20261107-wifi-firmware.img`，SHA-256 `2d0031732c9a5daedb3377e25416a035d3a137742a44f9a45f00d1f41c4081ce`。独立解包确认相对已部署 persist 修正版仅 device.toml 改变，kernel/second/DTBO/DTB、程序和库不变；全部支持资产和 AVB NONE/hash 核验通过。
 
 已确认同一 KB2000 / 50a390b0、槽 `_a`，备份 recovery_a 至 `~/skyward-work/backups/20261107-wifi-firmware/recovery_a-before.img`，主机与设备备份 SHA-256 均为 `f3ffd18cea18825dd1767f786e99bcab16818a8deeb5082b80ca1d8d91d0d7e6`。新镜像传输后校验、dd + fsync 写入 recovery_a，分区读回哈希与新镜像一致，随后 reboot recovery 返回 0。回执为同目录 deployment.json。驱动加载、真实扫描和联网等待下一次 recovery 实测，本轮不声称 Wi-Fi 扫描已修复。
+
+## MHI 已启动、QMI 无响应：补 QRTR 名称服务
+
+用户再次反馈无扫描列表并重启系统。已取回持久日志及 `20261107-015557` 手动日志，副本为 `~/skyward-work/wifi-firmware-result-20261107/`。新日志证实前两项修正确实生效：kernel.log:2834–2836 有 `Wifi Turning On from UI`、`Loading driver`，:2859–2863 显示 amss20.bin 已加载且 MHI 到达 MISSION_MODE。此后 :3062–3064 等待 FW ready / calibration 40000ms 超时，未到 wlan0 或 supplicant 阶段。不能把 UI 开关状态当作驱动已就绪。
+
+正常系统进程有 `vendor_qrtr` 用户的 `qrtr-ns -f`，recovery 的完整进程列表只有内核 qrtr_rx，没有名称服务。正常 vendor init.qcom.rc:625–629 和 init.wlan.qcom.rc:695–699 均声明该服务，uid/gid 为 vendor_qrtr=2906，capabilities 为 NET_BIND_SERVICE；实际正常进程 capability mask 为 0x400，与声明一致。
+
+内核 `cnss_qmi_init` 使用 qmi_add_lookup 等待 WLFW 服务；QRTR 的 qrtr_hello_work 在控制端口没有名称服务绑定时直接返回，不发 HELLO。本次 recovery 日志在 MISSION_MODE 后没有 QMI server-arrive，再结合名称服务进程缺失，定位到未启动 QRTR 服务发现链路。修正为在 device.toml 的 service 列表中启动 vendor 的 `qrtr-ns -f`，使用相同 UID/GID 和能力、现有服务监督机制及 vendor/stock 库路径。提交 `4c1977b`。没有在正常系统再启动第二个 qrtr-ns，也没有修改正常系统 Wi-Fi。
+
+读取本机 qrtr-ns 和 libqrtr.so 做静态闭包核对，7 个 ELF 无缺库或强符号缺失，报告为该取证目录 qrtr-dependency-audit.json。24 项配置测试通过。候选 `~/skyward-work/out/skyward-kebab-20261107-wifi-qrtr.img`，SHA-256 `33eef4ddffa71727df3f5cfc0b8eb2c98d9cf03429c5c7db77ef94cda79fc21a`。最终解包核对相对上版仅 device.toml 改变，其他程序、库和 kernel/second/DTBO/DTB 一致；AVB NONE/hash 校验通过。
+
+已备份当前 recovery_a 至 `~/skyward-work/backups/20261107-wifi-qrtr/recovery_a-before.img`（SHA-256 `2d0031732c9a5daedb3377e25416a035d3a137742a44f9a45f00d1f41c4081ce`），确认同一 KB2000 / 50a390b0、槽 `_a` 后写入新镜像、fsync，分区读回哈希与新镜像完全一致。随后 reboot recovery 返回 0。部署回执为同目录 deployment.json。下一轮验收重点为 QRTR 名称服务存活、QMI server-arrive / FW ready、wlan0、supplicant PONG 和真实扫描。本轮没有证据证明这些后续行为已成功。
