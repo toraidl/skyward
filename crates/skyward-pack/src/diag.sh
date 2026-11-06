@@ -75,7 +75,20 @@ status() {
     date
     cat /proc/uptime
     echo '--- properties'
-    getprop
+    # Query only boot, crypto and USB properties. Enumerating every Android
+    # property maps hundreds of unrelated contexts and flooded the recovery
+    # audit log with getprop denials on the OnePlus stock policy.
+    for key in ro.boot.serialno ro.product.model ro.boot.slot_suffix \
+        ro.build.version.release ro.build.version.security_patch ro.vendor.build.security_patch \
+        hwservicemanager.ready vendor.sys.listeners.registered vendor.gatekeeper.disable_spu \
+        logd.ready sys.usb.config sys.usb.state sys.usb.controller sys.usb.configfs \
+        sys.usb.ffs.ready sys.usb.ffs.mtp.ready \
+        init.svc.recovery init.svc.logd init.svc.adbd init.svc.fastbootd \
+        init.svc.gatekeeperd init.svc.hal_cryptoeng_oplus \
+        init.svc.vendor.keymaster-4-1 init.svc.vendor.gatekeeper-1-0 \
+        init.svc.vendor.keymasterd init.svc.vendor.qseecomd; do
+        printf '[%s]: [%s]\n' "$key" "$(getprop "$key")"
+    done
     echo '--- processes'
     ps -A -o USER,PID,PPID,NAME,ARGS
     echo '--- mounts'
