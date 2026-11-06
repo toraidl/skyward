@@ -83,3 +83,15 @@ OTA 需要在 recovery 中重新选择同一真实包，核对确认页版本和
 用户重启回正常系统后，已重新连上同一 KB2000 / 50a390b0（`_a`）。先保存上次 recovery 持久日志，再完整备份 recovery_a。新日志 `~/skyward-work/backups/20261107-wifi-persist/logs-before/recovery.log:28` 明确给出 `Device or resource busy (os error 16)`，同目录 status.txt:558 确认 persist 已挂载 ext4。因此重复挂载导致 EBUSY 已有本轮直接证据，不再只是静态推测。
 
 旧版备份 `~/skyward-work/backups/20261107-wifi-persist/recovery_a-before.img`，主机/设备 SHA-256 均为 `4b752532fa5776c072da3c3f912867e9550be2a71ee91652b864b7c928b8bad5`。修正版传入后验证哈希，dd + fsync 写 recovery_a，分区读回哈希为 `f3ffd18cea18825dd1767f786e99bcab16818a8deeb5082b80ca1d8d91d0d7e6`，与修正版一致。随后执行 `adb reboot recovery`，命令返回 0。回执在同一备份目录 deployment.json。Wi-Fi 后续启动、扫描、联网仍待 recovery 实测。
+
+## 无扫描列表：固件查找和内建驱动触发
+
+用户报告 Wi-Fi 可开启但无网络，重启回正常系统后已保存持久日志及 `/sdcard/skyward/logs/20261107-014838` 的手动导出，副本在 `~/skyward-work/wifi-scan-20261107/`。本次 recovery.log:28 明确为 `the driver made no wlan0 in 20 seconds`，kernel.log:2883–2892 显示 ueventd 找不到不带前缀的 `amss20.bin`。因此尚未运行 supplicant、尚未真正执行扫描，不能将此日志解释为扫描返回零 BSS。
+
+正常系统内核 #4 和 recovery 内核 #73 使用不同设备树：CNSS 的 `use_fw_path_with_prefix` 由 `qcom,converged-dt` 决定。recovery 日志的 `FW name is amss20.bin` 与未开启前缀路径吻合。修正 amss20.bin、m3.bin、bdwlan.elf 的加载目标为平坦名称，资产来源仍为当前槽 modem 中的 `image/qca6390/`，不改固件内容（提交 `ad9a2d0`）。
+
+另核对 `wlan_hdd_main.c`：内建驱动的 hdd_module_init 只创建 `/dev/wlan`；其 write handler 接收 ON 后才调用 hdd_driver_load，且固定从用户缓冲区读取三个字节。fs_ready 只投递 COLD_BOOT_CAL_START，不能代替这一步。配置因此在固件准备和 fs_ready 后追加向 `/dev/wlan` 写入三个字节 `ON\n`（提交 `0055768`）。保留内核中也能找到对应 `Wifi Turning On from UI` 字符串。本轮未在正常系统向该节点写入，以免中断当前 Wi-Fi ADB。
+
+24 项现有配置测试通过。新镜像 `~/skyward-work/out/skyward-kebab-20261107-wifi-firmware.img`，SHA-256 `2d0031732c9a5daedb3377e25416a035d3a137742a44f9a45f00d1f41c4081ce`。独立解包确认相对已部署 persist 修正版仅 device.toml 改变，kernel/second/DTBO/DTB、程序和库不变；全部支持资产和 AVB NONE/hash 核验通过。
+
+已确认同一 KB2000 / 50a390b0、槽 `_a`，备份 recovery_a 至 `~/skyward-work/backups/20261107-wifi-firmware/recovery_a-before.img`，主机与设备备份 SHA-256 均为 `f3ffd18cea18825dd1767f786e99bcab16818a8deeb5082b80ca1d8d91d0d7e6`。新镜像传输后校验、dd + fsync 写入 recovery_a，分区读回哈希与新镜像一致，随后 reboot recovery 返回 0。回执为同目录 deployment.json。驱动加载、真实扫描和联网等待下一次 recovery 实测，本轮不声称 Wi-Fi 扫描已修复。
