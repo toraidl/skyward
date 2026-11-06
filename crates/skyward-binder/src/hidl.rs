@@ -118,6 +118,11 @@ impl Message {
 
     /// Hold on to bytes the driver will read, and say where they are.
     fn keep(&mut self, bytes: Vec<u8>) -> u64 {
+        // Nothing at all is handed over as no address, as the phone's own
+        // code hands over an empty vector.
+        if bytes.is_empty() {
+            return 0;
+        }
         let bytes = bytes.into_boxed_slice();
         let at = bytes.as_ptr() as u64;
         self.held.push(bytes);
