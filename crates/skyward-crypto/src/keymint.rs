@@ -120,17 +120,17 @@ pub struct Hardware {
     pub author: String,
 }
 
-/// The phone's key service, as this program talks to it.
-pub struct KeyMint<'a> {
+/// The phone's key service of the newer kind, as this program talks to it.
+pub struct KeyMintDevice<'a> {
     device: Handle<'a>,
 }
 
-impl<'a> KeyMint<'a> {
+impl<'a> KeyMintDevice<'a> {
     /// Reach the running key service, or say that none is.
-    pub fn open(binder: &'a Binder) -> Result<KeyMint<'a>> {
+    pub fn open(binder: &'a Binder) -> Result<KeyMintDevice<'a>> {
         let device = service::find(binder, SERVICE)?
             .with_context(|| format!("{SERVICE} is not running; the phone's key service has to be started first"))?;
-        Ok(KeyMint { device })
+        Ok(KeyMintDevice { device })
     }
 
     pub fn hardware(&self) -> Result<Hardware> {
@@ -335,5 +335,79 @@ impl<'a> KeyMint<'a> {
     pub fn usable(&self, key_blob: &[u8], app_id: &[u8]) -> Result<()> {
         let operation = self.begin(key_blob, app_id, &[0; NONCE_BYTES], None)?;
         self.abort(&operation)
+    }
+}
+
+/// The phone's key service, whichever kind the phone runs: the newer kind
+/// registered with the service directory, or the older kind, a hardware
+/// service reached over the other driver, as the phones this port is for
+/// run. Both use an AES-GCM key the same way; only the calls differ.
+pub struct KeyMint<'a> {
+    service: Service<'a>,
+}
+
+enum Service<'a> {
+    Newer(KeyMintDevice<'a>),
+    Older(super::keymaster::Keymaster<'a>),
+}
+
+impl<'a> KeyMint<'a> {
+    /// Reach the running key service: the newer kind through `binder`
+    /// where the phone describes one, the older kind through `hardware`
+    /// otherwise.
+    pub fn open(binder: &'a Binder, hardware: &'a Binder) -> Result<KeyMint<'a>> {
+        // A recovery runs no servicemanager of the newer kind; asking the
+        // directory is only a way to find out whether one was started.
+        let described = service::declared(binder, SERVICE).unwrap_or(false);
+        Ok(match described {
+            true => KeyMint { service: Service::Newer(KeyMintDevice::open(binder)?) },
+            false => KeyMint { service: Service::Older(super::keymaster::Keymaster::open(hardware)?) },
+        })
+    }
+
+    pub fn hardware(&self) -> Result<Hardware> {
+        match &self.service {
+            Service::Newer(device) => device.hardware(),
+            Service::Older(device) => {
+                let hardware = device.hardware()?;
+                Ok(Hardware { version: 4, security_level: hardware.security_level, name: hardware.name, author: hardware.author })
+            }
+        }
+    }
+
+    pub fn ephemeral_storage_key(&self, key: &[u8]) -> Result<Vec<u8>> {
+        match &self.service {
+            Service::Newer(device) => device.ephemeral_storage_key(key),
+            Service::Older(device) => device.ephemeral_storage_key(key),
+        }
+    }
+
+    pub fn authorizations(&self, key_blob: &[u8], app_id: &[u8]) -> Result<Vec<(i32, i64)>> {
+        match &self.service {
+            Service::Newer(device) => device.authorizations(key_blob, app_id),
+            Service::Older(device) => device.authorizations(key_blob, app_id),
+        }
+    }
+
+    pub fn gcm_decrypt(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8], body: &[u8], note: Option<&Token>) -> Result<Vec<u8>> {
+        match &self.service {
+            Service::Newer(device) => device.gcm_decrypt(key_blob, app_id, nonce, body, note),
+            Service::Older(device) => device.gcm_decrypt(key_blob, app_id, nonce, body, note),
+        }
+    }
+
+    pub fn usable(&self, key_blob: &[u8], app_id: &[u8]) -> Result<()> {
+        match &self.service {
+            Service::Newer(device) => device.usable(key_blob, app_id),
+            Service::Older(device) => device.usable(key_blob, app_id),
+        }
+    }
+
+    /// Which service answered, for the About page's diagnostics.
+    pub fn describes(&self) -> String {
+        match &self.service {
+            Service::Newer(_) => "keymint".into(),
+            Service::Older(device) => device.interface().to_string(),
+        }
     }
 }
