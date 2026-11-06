@@ -69,8 +69,8 @@ enum Cmd {
         /// The monospaced typeface's licence, which goes with it.
         #[arg(long)]
         mono_license: PathBuf,
-        /// Leave a snapshot of the boot on the persist partition, for a
-        /// recovery whose port never comes up to be read over adb.
+        /// Keep bounded boot logs on the OnePlus log filesystem or persist,
+        /// readable after reboot even when /data and USB stay unavailable.
         #[arg(long)]
         diagnostics: bool,
         #[arg(long)]
@@ -259,7 +259,7 @@ const TASK_PROFILES: &[u8] = include_bytes!("task_profiles.json");
 /// stock recovery does not offer.
 const MTP_RC: &[u8] = include_bytes!("mtp.rc");
 
-/// The program that leaves a snapshot of the boot on the persist partition.
+/// The program that keeps boot snapshots on storage independent of /data.
 const DIAG: &[u8] = include_bytes!("diag.sh");
 
 /// The init rules that run that program as the recovery boots.
