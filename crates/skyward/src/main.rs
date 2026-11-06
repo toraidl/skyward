@@ -161,6 +161,10 @@ enum Cmd {
         /// as profile_key_name_decrypt_999.
         #[arg(long)]
         alias: Option<String>,
+        /// Unwrap the key and say how long it is, without asking first what
+        /// it may be used for.
+        #[arg(long)]
+        unwrap: bool,
     },
     /// Say what the phone's credential service answers, which takes no
     /// credential and changes nothing.
@@ -311,7 +315,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         #[cfg(target_os = "android")]
-        Cmd::Keymint { key, alias } => {
+        Cmd::Keymint { key, alias, unwrap } => {
             let (binder, hardware) = (skyward_binder::driver::Binder::open()?, skyward_binder::driver::Binder::hardware()?);
             let service = skyward_crypto::keymint::KeyMint::open(&binder, &hardware)?;
             let hw = service.hardware()?;
@@ -333,6 +337,12 @@ fn main() -> Result<()> {
                     Ok(()) => println!("the key service unwraps it and will use it"),
                     Err(e) => println!("the key service will not use it: {e:#}"),
                 }
+                return Ok(());
+            }
+            if unwrap {
+                let stored = skyward_crypto::keystore::StoredKey::load(&key)?;
+                let raw = stored.unwrap(skyward_crypto::keystore::Unwrap::Hardware(&service))?;
+                println!("{} holds a key of {} bytes", key.display(), raw.len());
                 return Ok(());
             }
             let stored = skyward_crypto::keystore::StoredKey::load(&key)?;
