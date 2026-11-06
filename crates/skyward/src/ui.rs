@@ -125,10 +125,14 @@ impl Backlight {
 /// their factory tests drive the panel to, on the backlight's own scale:
 /// the 13 Ultra's panels give that level as well, and it comes to the same
 /// half of their range as the normal maximum they give.
-const NORMAL_MAX: [(&str, &str); 3] = [
+const NORMAL_MAX: [(&str, &str); 5] = [
     ("mi,normal-max-brightness-clone", "mi,max-brightness-clone"),
     ("mi,max-brightness-normal", "qcom,mdss-dsi-bl-max-level"),
     ("mi,mdss-dsi-fac-bl-max-level", "qcom,mdss-dsi-bl-max-level"),
+    // Qualcomm's own panels, and the OnePlus panels built on them, give
+    // the level their slider reaches and the whole of their range.
+    ("qcom,mdss-dsi-bl-normal-max-level", "qcom,mdss-dsi-bl-max-level"),
+    ("qcom,mdss-brightness-normal-max-level", "qcom,mdss-brightness-max-level"),
 ];
 
 /// The raw backlight level, out of `max`, at the panel's normal maximum.
@@ -142,13 +146,10 @@ fn normal_max(max: u32) -> Result<u32> {
     // "qcom,mdss_dsi_m1_42_02_0a_dsc_cmd:"; the driver takes no name
     // without the colon either.
     let (name, _) = boot.trim().split_once(':').with_context(|| format!("{param} names no panel: {boot:?}"))?;
+    // The panel sits under the display driver's own node, which is under
+    // the SoC's, and how deep the tree nests it is the SoC's business.
     let soc = Path::new("/proc/device-tree/soc");
-    let node = fs::read_dir(soc)
-        .with_context(|| format!("read {}", soc.display()))?
-        .map(|e| e.map(|e| e.path().join(name)))
-        .collect::<std::io::Result<Vec<_>>>()?
-        .into_iter()
-        .find(|p| p.is_dir())
+    let node = panel_node(soc, name, 3)
         .ok_or_else(|| anyhow!("panel {name} is not in the device tree"))?;
     let cell = |prop: &str| -> Result<u32> {
         let path = node.join(prop);
@@ -163,6 +164,27 @@ fn normal_max(max: u32) -> Result<u32> {
     let (normal, full) = (cell(normal)?, cell(full)?);
     ensure!(normal > 0 && normal <= full, "panel {name}: normal maximum {normal} out of {full}");
     Ok((f64::from(max) * f64::from(normal) / f64::from(full)).round() as u32)
+}
+
+/// The device tree node of the panel named `name`, looked for under `dir`
+/// and the `depth` levels below it.
+fn panel_node(dir: &Path, name: &str, depth: usize) -> Option<PathBuf> {
+    if depth == 0 {
+        return None;
+    }
+    for entry in fs::read_dir(dir).ok()?.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        if entry.file_name().to_str() == Some(name) {
+            return Some(path);
+        }
+        if let Some(found) = panel_node(&path, name, depth - 1) {
+            return Some(found);
+        }
+    }
+    None
 }
 
 /// Leave recovery for the chosen target.
