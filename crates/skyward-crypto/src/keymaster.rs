@@ -11,7 +11,7 @@
 
 use crate::token::Token;
 use anyhow::{bail, Context, Result};
-use skyward_binder::driver::Handle;
+use skyward_binder::driver::{Handle, Reply as BinderReply};
 use skyward_binder::hidl::Message;
 
 /// The phone's key service, whichever version of its interface it serves.
@@ -111,7 +111,7 @@ impl<'a> Keymaster<'a> {
 
     pub fn hardware(&self) -> Result<Hardware> {
         let reply = self.call(GET_HARDWARE_INFO, Message::call(TOKEN), "ask the key service about itself")?;
-        let mut read = Reply::new(&reply);
+        let mut read = Reply::new(reply.bytes());
         read.status()?;
         let security_level = read.i32()?;
         let name = read.string()?;
@@ -143,7 +143,7 @@ impl<'a> Keymaster<'a> {
         call.bytes(&[]);
         call.bytes(&[]);
         let reply = self.call(EXPORT_KEY, call, "make a storage key for this start")?;
-        let mut read = Reply::new(&reply);
+        let mut read = Reply::new(reply.bytes());
         read.status()?;
         read.error()?;
         read.vector()
@@ -158,7 +158,7 @@ impl<'a> Keymaster<'a> {
         call.bytes(app_id);
         call.bytes(&[]);
         let reply = self.call(GET_KEY_CHARACTERISTICS, call, "ask what the key may be used for")?;
-        let mut read = Reply::new(&reply);
+        let mut read = Reply::new(reply.bytes());
         read.status()?;
         read.error()?;
         // Both lists a key's authorizations are split into, in the order the
@@ -219,7 +219,7 @@ impl<'a> Keymaster<'a> {
         Self::write_params(&mut call, &params);
         Self::write_auth_token(&mut call, note);
         let reply = self.call(BEGIN, call, "start a decryption")?;
-        let mut read = Reply::new(&reply);
+        let mut read = Reply::new(reply.bytes());
         read.status()?;
         read.error()?;
         read.params().context("read what the decryption came back with")?;
@@ -234,7 +234,7 @@ impl<'a> Keymaster<'a> {
         Self::write_auth_token(&mut call, None);
         Self::write_verification_token(&mut call);
         let reply = self.call(UPDATE, call, "feed the decryption")?;
-        let mut read = Reply::new(&reply);
+        let mut read = Reply::new(reply.bytes());
         read.status()?;
         read.error()?;
         read.u32().context("read how much of the data was taken")?;
@@ -251,7 +251,7 @@ impl<'a> Keymaster<'a> {
         Self::write_auth_token(&mut call, None);
         Self::write_verification_token(&mut call);
         let reply = self.call(FINISH, call, "close the decryption")?;
-        let mut read = Reply::new(&reply);
+        let mut read = Reply::new(reply.bytes());
         read.status()?;
         read.error()?;
         read.params().context("read what the decryption came back with")?;
@@ -262,7 +262,7 @@ impl<'a> Keymaster<'a> {
         let mut call = Message::call(TOKEN);
         call.u64(operation);
         let reply = self.call(ABORT, call, "drop the decryption")?;
-        let mut read = Reply::new(&reply);
+        let mut read = Reply::new(reply.bytes());
         read.status()?;
         read.error().map(|_| ()).context("drop the decryption")
     }
@@ -276,15 +276,18 @@ impl<'a> Keymaster<'a> {
         call.bytes(key_blob);
         Self::write_params(&mut call, params);
         let reply = self.call(UPGRADE_KEY, call, "renew the key")?;
-        let mut read = Reply::new(&reply);
+        let mut read = Reply::new(reply.bytes());
         read.status()?;
         read.error()?;
         read.vector().context("read the renewed key")
     }
 
-    fn call(&self, code: u32, message: Message, what: &str) -> Result<Vec<u8>> {
-        let reply = self.device.transact(code, &message).with_context(|| what.to_string())?;
-        Ok(reply.bytes().to_vec())
+    // HIDL replies contain pointers into Binder-owned scatter/gather buffers.
+    // Copying only the top-level bytes leaves dangling pointers when the
+    // Binder reply is dropped. Keep it alive until each caller has decoded
+    // and copied all nested strings, parameters and output bytes.
+    fn call(&self, code: u32, message: Message, what: &str) -> Result<BinderReply<'a>> {
+        self.device.transact(code, &message).with_context(|| what.to_string())
     }
 
     /// Write a vector of key parameters: its frame, the elements, and for
