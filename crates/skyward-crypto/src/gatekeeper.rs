@@ -144,12 +144,26 @@ impl<'a> Gatekeeper<'a> {
     pub fn open(binder: &'a skyward_binder::driver::Binder, hardware: &'a skyward_binder::driver::Binder) -> Result<Gatekeeper<'a>> {
         use skyward_binder::{hidl, service};
         let not_running = |name: &str| format!("{name} is not running; the phone's credential service has to be started first");
-        if service::declared(binder, SERVICE)? {
+        let described = service::declared(binder, SERVICE);
+        if matches!(described, Ok(true)) {
             let device = service::find(binder, SERVICE)?.with_context(|| not_running(SERVICE))?;
             return Ok(Gatekeeper::Newer(device));
         }
-        let device = hidl::find(hardware, HARDWARE_SERVICE, INSTANCE)?.with_context(|| not_running(HARDWARE_SERVICE))?;
-        Ok(Gatekeeper::Older(device))
+        // A stock recovery's service directory may not accept the newer
+        // declaration query. That must not hide a registered HIDL HAL.
+        // Discovering it does not submit or retry a credential.
+        let legacy = hidl::find(hardware, HARDWARE_SERVICE, INSTANCE)
+            .with_context(|| match &described {
+                Err(e) => format!("AIDL Gatekeeper discovery failed ({e:#}); look up the HIDL fallback"),
+                _ => format!("look up {HARDWARE_SERVICE}/{INSTANCE}"),
+            })?;
+        match legacy {
+            Some(device) => Ok(Gatekeeper::Older(device)),
+            None => match described {
+                Err(e) => Err(e.context(format!("no {HARDWARE_SERVICE}/{INSTANCE} fallback is registered"))),
+                _ => anyhow::bail!(not_running(HARDWARE_SERVICE)),
+            },
+        }
     }
 
     /// What the service says it serves. This changes nothing and takes no
