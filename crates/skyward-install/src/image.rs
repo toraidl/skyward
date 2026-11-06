@@ -187,6 +187,7 @@ pub fn flash<R: Read + Seek>(image: &mut R, len: u64, devices: &[PathBuf], progr
     let mut outs = Vec::with_capacity(devices.len());
     for path in devices {
         let mut f = OpenOptions::new().read(true).write(true).open(path).with_context(|| format!("open {}", path.display()))?;
+        writable(&f, path)?;
         let size = f.seek(SeekFrom::End(0)).with_context(|| format!("find the size of {}", path.display()))?;
         f.seek(SeekFrom::Start(0)).with_context(|| format!("rewind {}", path.display()))?;
         outs.push((path, f, size));
@@ -241,6 +242,31 @@ pub fn flash<R: Read + Seek>(image: &mut R, len: u64, devices: &[PathBuf], progr
         }
         ensure!(back.finalize() == written, "{} reads back different from what was written", path.display());
     }
+    Ok(())
+}
+
+/// Let the kernel take writes for a partition something left read-only, as
+/// `blockdev --setrw` does. A plain file, which the tests write, is left as
+/// it is.
+#[cfg(target_os = "android")]
+pub(crate) fn writable(f: &File, path: &Path) -> Result<()> {
+    use std::os::fd::AsRawFd;
+    // _IO(0x12, 93): whether a block device takes writes.
+    const BLKROSET: libc::Ioctl = 0x125d;
+    let off: libc::c_int = 0;
+    let rc = unsafe { libc::ioctl(f.as_raw_fd(), BLKROSET, &off) };
+    if rc != 0 {
+        let e = io::Error::last_os_error();
+        // A plain file has no such flag; writing it is still allowed.
+        if e.raw_os_error() != Some(libc::ENOTTY) {
+            return Err(e).with_context(|| format!("let {}", path.display()));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "android"))]
+pub(crate) fn writable(_: &File, _: &Path) -> Result<()> {
     Ok(())
 }
 
