@@ -62,6 +62,46 @@ probe = "http://connectivitycheck.gstatic.com/generate_204"
 # its binary has to mount it itself, and before anything tries to open data.
 [partitions]
 mounted = ["metadata"]
+# Verified from this installed build and /my_manifest/build.prop.
+ab_ota = [
+    "abl",
+    "aop",
+    "bluetooth",
+    "boot",
+    "cmnlib",
+    "cmnlib64",
+    "devcfg",
+    "dsp",
+    "dtbo",
+    "hyp",
+    "imagefv",
+    "keymaster",
+    "logo",
+    "modem",
+    "my_bigball",
+    "my_carrier",
+    "my_company",
+    "my_engineering",
+    "my_heytap",
+    "my_manifest",
+    "my_preload",
+    "my_product",
+    "my_region",
+    "my_stock",
+    "odm",
+    "product",
+    "qupfw",
+    "recovery",
+    "storsec",
+    "system",
+    "system_ext",
+    "tz",
+    "vbmeta",
+    "vbmeta_system",
+    "vendor",
+    "xbl",
+    "xbl_config",
+]
 
 # The phone's hardware services, which the stock recovery starts only when
 # its own recovery binary sets a property as it decrypts. Skyward starts

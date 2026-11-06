@@ -137,7 +137,7 @@ fn main() -> Result<()> {
                 anyhow::bail!("{} holds {}, which is not a stock recovery", stock.display(), e.name);
             }
             let read = |p: &PathBuf| std::fs::read(p).with_context(|| format!("read {}", p.display()));
-            skyward_config::DeviceConfig::load(&config)?;
+            let device = skyward_config::DeviceConfig::load(&config)?;
             rd.replace(paths::RECOVERY, read(&binary)?)?;
             if let Some(root) = update_engine_root {
                 update_engine::bundle(&mut rd, &root)?;
@@ -183,15 +183,26 @@ fn main() -> Result<()> {
                 .find(paths::PROP_DEFAULT)
                 .with_context(|| format!("{} is not in the ramdisk", paths::PROP_DEFAULT))?
                 .data;
-            let mut props = without(stock_props, &BUILD_VERSION);
+            let configured = configured_properties(&device);
+            let mut omitted = BUILD_VERSION.to_vec();
+            omitted.extend(configured.iter().map(|(name, _)| *name));
+            let mut props = without(stock_props, &omitted);
             props.extend_from_slice(OPEN_RECOVERY);
+            for (name, value) in &configured {
+                props.extend_from_slice(format!("\n{name}={value}\n").as_bytes());
+            }
             rd.replace(paths::PROP_DEFAULT, props)?;
             // OPPO's and OnePlus's recoveries load this one ahead of
             // `prop.default`, and a read-only property cannot be set twice:
             // the first file to set adb's authorization decides it.
             if let Some(e) = rd.find(paths::SECURE_PROP) {
-                let mut secure = without(&e.data, &SECURE_NAMES);
+                let mut omitted = SECURE_NAMES.to_vec();
+                omitted.extend(configured.iter().map(|(name, _)| *name));
+                let mut secure = without(&e.data, &omitted);
                 secure.extend_from_slice(OPEN_RECOVERY);
+                for (name, value) in &configured {
+                    secure.extend_from_slice(format!("\n{name}={value}\n").as_bytes());
+                }
                 rd.replace(paths::SECURE_PROP, secure)?;
             }
             img.ramdisk = rd.encode()?;
@@ -215,6 +226,14 @@ fn support_elf(path: &Path) -> Result<Vec<u8>> {
     let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
     ensure!(bytes.len() >= 64 && &bytes[..6] == b"\x7fELF\x02\x01" && bytes[18..20] == [183, 0], "{} is not a little-endian arm64 ELF", path.display());
     Ok(bytes)
+}
+
+fn configured_properties(device: &skyward_config::DeviceConfig) -> Vec<(&'static str, String)> {
+    let mut properties = Vec::new();
+    if !device.partitions.ab_ota.is_empty() {
+        properties.push(("ro.product.ab_ota_partitions", device.partitions.ab_ota.join(",")));
+    }
+    properties
 }
 
 /// The partition a recovery is made on, as a full update package names it.

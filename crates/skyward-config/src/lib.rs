@@ -340,6 +340,11 @@ pub struct Partitions {
     /// them starts.
     #[serde(default)]
     pub mounted: Vec<String>,
+    /// The installed build's A/B OTA partition list, also used to preserve
+    /// partitions absent from a partial payload. Published in the ramdisk
+    /// as ro.product.ab_ota_partitions before update_engine starts.
+    #[serde(default)]
+    pub ab_ota: Vec<String>,
 }
 
 /// A program from the phone's own partitions that the recovery keeps
@@ -517,6 +522,10 @@ impl DeviceConfig {
         }
         for name in &cfg.partitions.mounted {
             ensure!(!name.is_empty() && !name.contains('/'), "[partitions] mounted: {name} is not a partition's name");
+        }
+        ensure!(cfg.device.ab || cfg.partitions.ab_ota.is_empty(), "[partitions] ab_ota requires an A/B device");
+        for name in &cfg.partitions.ab_ota {
+            ensure!(!name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'), "[partitions] ab_ota: {name} is not a partition's name");
         }
         for s in cfg.services.iter().filter(|s| s.oneshot) {
             let waits = s.ready_property.is_some() || s.ready_service.is_some() || s.ready_hardware_service.is_some();
