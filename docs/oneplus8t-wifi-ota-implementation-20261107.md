@@ -69,3 +69,11 @@ OTA 需要在 recovery 中重新选择同一真实包，核对确认页版本和
 传入新镜像后验证设备文件哈希，使用 dd + fsync 写入 recovery_a，再直接计算分区 SHA-256，结果与候选镜像的 `4b752532…b8bad5` 完全一致。随后 `adb -s 192.168.144.228:5555 reboot recovery` 返回 0，网络 ADB 转为 offline。没有操作 recovery_b 或另一台 USB 手机。回执在 `~/skyward-work/backups/20261107-wifi-ota/deployment.json`。
 
 写入和重启命令已验证；恢复界面、解密、Wi-Fi 和实际 OTA 安装等待用户设备端测试，不能由网络 ADB 断开推断已成功进入 recovery。
+
+## 首次 Wi-Fi 测试后的 persist 修正
+
+用户报告 `mount /dev/block/by-name/persist on /skyward/wlan/persist as erofs`。源码中的 mount_ro 按 erofs、ext4、f2fs 顺序探测，只有 EINVAL/ENODEV 会继续，其他错误直接返回；目前未取得完整 errno，不能断言具体内核拒绝原因。已有 `current/status.txt:545` 确认该 recovery 的 init 已将 persist 以 ext4 挂在 `/mnt/vendor/persist`。因此改为直接从 `/mnt/vendor/persist/qca6390/wlan_mac.bin` 读取，无需再次挂载或探测 persist。
+
+修正提交 `f328045`。产物 `~/skyward-work/out/skyward-kebab-20261107-wifi-ota-persist.img`，SHA-256 `f3ffd18cea18825dd1767f786e99bcab16818a8deeb5082b80ca1d8d91d0d7e6`。24 项既有配置测试、最终 cpio 内容核验及 AVB NONE/hash 验证通过。与刚部署的 Wi-Fi/OTA 镜像相比，只有 `skyward/device.toml` 内容改变，所有其他 ramdisk 条目以及 kernel、second、DTBO、DTB 一致。本次仅调整配置，无须重编译恢复程序。
+
+修正版尚未刷入：目标网络 ADB 显示 offline，唯一在线 USB 设备为另一台 PEDM00，未对其操作。需用户回到正常系统恢复 8T 网络 ADB 后继续部署。
