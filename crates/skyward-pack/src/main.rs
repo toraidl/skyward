@@ -32,7 +32,7 @@ enum Cmd {
     Repack { image: PathBuf, out: PathBuf },
     /// Join a kernel and another image's ramdisk into one boot image.
     Boot {
-        /// Image holding the kernel (the device's boot partition).
+        /// A bare arm64 Image or an image holding the kernel.
         #[arg(long)]
         kernel: PathBuf,
         /// Image holding the ramdisk.
@@ -50,6 +50,10 @@ enum Cmd {
         /// phone or a full update package holds it, ending in its AVB footer.
         #[arg(long)]
         stock: PathBuf,
+        /// Replace the stock kernel with a bare arm64 Image or an image
+        /// holding one, while keeping the stock ramdisk, DTBO and DTB.
+        #[arg(long)]
+        kernel: Option<PathBuf>,
         /// Skyward built for the device (aarch64-linux-android).
         #[arg(long)]
         binary: PathBuf,
@@ -104,12 +108,15 @@ fn main() -> Result<()> {
         }
         Cmd::Boot { kernel, ramdisk, out } => {
             let mut img = BootImage::read(&ramdisk)?;
-            img.kernel = BootImage::read(&kernel)?.kernel;
+            img.kernel = BootImage::read_kernel(&kernel)?;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, binary, config, font, mono, mono_license, diagnostics, out } => {
+        Cmd::Recovery { stock, kernel, binary, config, font, mono, mono_license, diagnostics, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
+            if let Some(kernel) = kernel {
+                img.kernel = BootImage::read_kernel(&kernel)?;
+            }
             let mut rd = Ramdisk::decode(&img.ramdisk)?;
             // A stock recovery ramdisk has no third-party tree; refuse to build
             // on top of another custom recovery.

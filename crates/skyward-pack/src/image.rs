@@ -41,6 +41,21 @@ impl BootImage {
         Ok(BootImage { header, kernel, ramdisk, second, recovery_dtbo, dtb })
     }
 
+    /// The kernel in a boot image, or a bare arm64 `Image` as the kernel
+    /// build directory produces it. A build tree does not wrap its kernel in
+    /// an Android boot header; its boot packaging tools add that later.
+    pub fn read_kernel(path: &Path) -> Result<Vec<u8>> {
+        let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+        const ARM64_MAGIC_OFFSET: usize = 0x38;
+        const ARM64_MAGIC: &[u8; 4] = b"ARM\x64";
+        if bytes.get(ARM64_MAGIC_OFFSET..ARM64_MAGIC_OFFSET + ARM64_MAGIC.len()) == Some(ARM64_MAGIC) {
+            return Ok(bytes);
+        }
+        let header = Header::parse(&mut abootimg_oxide::binrw::io::Cursor::new(&bytes))
+            .with_context(|| format!("{} is neither a bare arm64 kernel nor a boot image", path.display()))?;
+        section(&bytes, header.kernel_position(), header.kernel_size(), "kernel")
+    }
+
     pub fn header_version(&self) -> u32 {
         self.header.header_version()
     }
@@ -236,5 +251,15 @@ mod tests {
         let HeaderV0Versioned::V2 { recovery_dtbo_addr, .. } = header.versioned else { unreachable!() };
         assert_eq!(recovery_dtbo_addr as usize, header.recovery_dtbo_position());
         assert_eq!(&bytes[header.recovery_dtbo_position()..][..back.recovery_dtbo.len()], back.recovery_dtbo.as_slice());
+    }
+
+    #[test]
+    fn a_kernel_tree_image_is_taken_without_a_boot_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Image");
+        let mut image = vec![0u8; 4096];
+        image[0x38..0x3c].copy_from_slice(b"ARM\x64");
+        fs::write(&path, &image).unwrap();
+        assert_eq!(BootImage::read_kernel(&path).unwrap(), image);
     }
 }
