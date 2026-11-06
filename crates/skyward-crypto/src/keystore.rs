@@ -92,6 +92,11 @@ impl StoredKey {
         id
     }
 
+    /// The blob the key service holds this key in.
+    pub fn blob(&self) -> Option<&[u8]> {
+        self.key_blob.as_deref()
+    }
+
     /// What the phone's key service says the wrapping key may be used for.
     #[cfg(target_os = "android")]
     pub fn authorizations(&self, service: &crate::keymint::KeyMint) -> Result<Vec<(i32, i64)>> {

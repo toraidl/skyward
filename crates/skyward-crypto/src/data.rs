@@ -81,10 +81,16 @@ pub fn storage_key(service: &KeyMint, entry: &Entry, encryption: &Encryption) ->
 /// itself: what comes back is wrapped again, for this start only.
 fn hardware_key(service: &KeyMint, dir: &Path, wrapped: bool) -> Result<Vec<u8>> {
     let stored = StoredKey::load(dir).with_context(|| format!("read the key in {}", dir.display()))?;
-    let key = stored.unwrap(Unwrap::Hardware(service)).with_context(|| format!("unwrap the key in {}", dir.display()))?;
+    // A key made for the storage hardware is not encrypted on disk at all:
+    // the key service holds it, and exports it in the form the hardware
+    // takes for this start. A key made for the key service itself is
+    // wrapped on disk, and the key service unwraps it.
     match wrapped {
-        true => service.ephemeral_storage_key(&key).with_context(|| format!("make the key in {} usable now", dir.display())),
-        false => Ok(key),
+        true => {
+            let blob = stored.blob().with_context(|| format!("{} holds no key for the key service", dir.display()))?;
+            service.ephemeral_storage_key(blob).with_context(|| format!("make the key in {} usable now", dir.display()))
+        }
+        false => stored.unwrap(Unwrap::Hardware(service)).with_context(|| format!("unwrap the key in {}", dir.display())),
     }
 }
 
