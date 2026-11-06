@@ -1,0 +1,27 @@
+[device]
+codename = "kebab"
+brand = "OnePlus"
+model = "OnePlus 8T"
+ab = true
+soc = { hans = "骁龙®865 移动平台", hant = "Snapdragon® 865 行動平台", en = "Snapdragon® 865 Mobile Platform" }
+os_version_prop = "ro.build.version.ota"
+
+[display]
+# The panel's own mode as the phone reports it: 1080 by 2400 at 480 dpi,
+# the 6.55-inch AMOLED of the KB2000.
+width = 1080
+height = 2400
+density = 480
+diagonal = 6.55
+corner_radius = 100
+
+# The stock ColorOS 14 build the ColorOS 17 port for this phone is based
+# on. Its recovery partition is the stock one: unlike the port's own full
+# package, whose recovery partition is an OrangeFox build, it carries the
+# phone maker's recovery init, adbd, SELinux policy and keymaster service.
+# The package is already on the computer that builds this image; a build
+# elsewhere gives the address the phone maker serves it at instead.
+[stock]
+version = "14.0.0.602"
+package = "/home/bruce/coloros_port/KB2000_14.0.0.602.zip"
+recovery = "6286ad199599cf15fc4a9634d213432985167ed05dd2cf59e2c57e8a20f59072"

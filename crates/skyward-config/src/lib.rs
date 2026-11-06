@@ -552,9 +552,16 @@ impl DeviceConfig {
         }
         if let Some(stock) = &cfg.stock {
             let name = stock.package.rsplit('/').next().unwrap_or_default();
+            // A port can be built from a full package already on the
+            // computer, by the path it was saved at, as well as from the
+            // address the phone maker serves it at.
+            let from_disk = Path::new(&stock.package).is_absolute();
             ensure!(
-                stock.package.starts_with("https://") && name.ends_with(".zip") && name.contains(&stock.version) && !stock.version.is_empty(),
-                "[stock] package: {} is not an HTTPS address of the full package of {}",
+                (stock.package.starts_with("https://") || from_disk)
+                    && name.ends_with(".zip")
+                    && name.contains(&stock.version)
+                    && !stock.version.is_empty(),
+                "[stock] package: {} is not an HTTPS address, or an absolute path, of the full package of {}",
                 stock.package,
                 stock.version
             );
