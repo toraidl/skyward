@@ -112,6 +112,16 @@ while :; do
     mv "$out/kernel.log.tmp" "$out/kernel.log"
     cat /tmp/recovery.log 2>&1 | tail -c 262144 >"$out/recovery.log.tmp"
     mv "$out/recovery.log.tmp" "$out/recovery.log"
+    if [ -f /tmp/update_engine.log ]; then
+        tail -c 524288 /tmp/update_engine.log >"$out/update_engine.log.tmp"
+        mv "$out/update_engine.log.tmp" "$out/update_engine.log"
+    fi
+    for stream in stdout stderr; do
+        if [ -f "/tmp/skyward-wlan/supplicant.$stream" ]; then
+            tail -c 65536 "/tmp/skyward-wlan/supplicant.$stream" >"$out/supplicant.$stream.tmp"
+            mv "$out/supplicant.$stream.tmp" "$out/supplicant.$stream"
+        fi
+    done
     timeout 3 logcat -b all -d -t 1600 2>&1 | tail -c 524288 >"$out/logcat.log.tmp"
     mv "$out/logcat.log.tmp" "$out/logcat.log"
     date >"$out/last-sync.txt.tmp"
