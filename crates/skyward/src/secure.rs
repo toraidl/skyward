@@ -48,6 +48,11 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 /// and where the installed system keeps the one it was built for: in the
 /// bundle that carries the rest of its own runtime.
 const EARLY_LOADER: &str = "/system/bin/bootstrap/linker64";
+/// The loader this recovery carries for the programs in its own ramdisk.
+/// Hardware wrappers there use it, and it lets the hardware services run
+/// even where SELinux keeps the loop worker away from the installed
+/// runtime bundle.
+const RECOVERY_LOADER: &str = "/system/bin/linker64";
 const RUNTIME_BUNDLE: &str = "com.android.runtime";
 const BUNDLE_LOADER: &str = "bin/linker64";
 
@@ -87,12 +92,28 @@ pub fn prepare_hardware_directory(wanted: &[String]) -> Result<()> {
     // A loader and the lowest libraries are built together and agree
     // between them on how a program's own storage is laid out, so the
     // installed system's programs are loaded by the installed system's
-    // loader rather than by the older one a recovery carries.
+    // loader rather than by the older one a recovery carries. A recovery
+    // whose SELinux policy blocks the loop worker from an APEX opened under
+    // its own domain can still run the hardware wrappers in its ramdisk with
+    // the loader beside them.
     let loader = Path::new(EARLY_LOADER);
-    let from = bundle(RUNTIME_BUNDLE)?
-        .map(|at| at.join(BUNDLE_LOADER))
-        .filter(|p| p.is_file())
-        .with_context(|| format!("the installed system carries no {RUNTIME_BUNDLE}, which holds the loader its own programs ask for"))?;
+    let from = match bundle(RUNTIME_BUNDLE).and_then(|at| {
+        let Some(at) = at else { return Ok(None) };
+        let loader = at.join(BUNDLE_LOADER);
+        ensure!(loader.is_file(), "{} holds no {BUNDLE_LOADER}", at.display());
+        Ok(Some(loader))
+    }) {
+        Ok(Some(loader)) => loader,
+        Ok(None) => {
+            skyward_sys::kmsg("the installed system carries no runtime bundle; using the recovery's own loader")?;
+            PathBuf::from(RECOVERY_LOADER)
+        }
+        Err(e) => {
+            skyward_sys::kmsg(&format!("the installed runtime bundle stays closed: {e:#}; using the recovery's own loader"))?;
+            PathBuf::from(RECOVERY_LOADER)
+        }
+    };
+    ensure!(from.is_file(), "the recovery carries no loader at {}", from.display());
     let dir = loader.parent().expect("the loader is in a directory");
     fs::create_dir_all(dir).with_context(|| format!("make {}", dir.display()))?;
     // Made under the recovery's own umask the folder is root's alone, and
@@ -159,7 +180,17 @@ fn describe_hardware(wanted: &[String]) -> Result<String> {
 /// need no bundle has none to open.
 pub fn libraries() -> Result<Option<PathBuf>> {
     let Some(version) = skyward_sys::prop(VENDOR_INTERFACE) else { return Ok(None) };
-    Ok(bundle(&format!("com.android.vndk.v{version}"))?.map(|at| at.join(BUNDLE_LIBS)))
+    let name = format!("com.android.vndk.v{version}");
+    match bundle(&name) {
+        Ok(at) => Ok(at.map(|at| at.join(BUNDLE_LIBS))),
+        Err(e) => {
+            // The hardware services already search /system/lib64 and
+            // /vendor/lib64. A VNDK bundle that cannot be opened under the
+            // recovery's SELinux domain must not stop them from starting.
+            skyward_sys::kmsg(&format!("{name} stays closed: {e:#}; using the libraries the services name"))?;
+            Ok(None)
+        }
+    }
 }
 
 /// Open the bundle of this name where it lies, and give where it is. A
