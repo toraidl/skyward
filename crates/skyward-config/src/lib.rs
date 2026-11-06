@@ -286,6 +286,10 @@ pub struct Display {
     /// sliding over another rounds its leading corners to it.
     #[serde(default)]
     pub corner_radius: u32,
+    /// Minimum x coordinate of the status clock, in physical panel pixels,
+    /// leaving room for a camera cutout on the left. Zero keeps the default.
+    #[serde(default)]
+    pub status_bar_left_inset: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

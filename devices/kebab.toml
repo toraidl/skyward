@@ -14,6 +14,9 @@ height = 2400
 density = 480
 diagonal = 6.55
 corner_radius = 100
+# Android reports the top-left cutout's bounds as x=0..165, y=0..103.
+# Leave another 24 physical pixels between that region and the clock.
+status_bar_left_inset = 189
 
 # /metadata keeps the key the data partition opens with and what libsnapshot
 # needs. The stock recovery mounts it as it starts; a recovery that replaces

@@ -2497,6 +2497,8 @@ pub struct App {
     backdrop: Option<Canvas>,
     /// How round the screen's corners are, in pixels.
     corners: f32,
+    /// Physical room reserved for a camera to the left of the status clock.
+    status_left_inset: f32,
     dirty: bool,
     w: u32,
     h: u32,
@@ -2558,6 +2560,7 @@ impl App {
             cols: 0,
             backdrop: None,
             corners: 0.0,
+            status_left_inset: 0.0,
             dirty: true,
             w,
             h,
@@ -2571,12 +2574,21 @@ impl App {
         self.corners = radius;
     }
 
+    /// Keep the clock beyond a left-side cutout without moving the page or
+    /// the status marks on the right. The same metrics apply during slides.
+    pub fn set_status_bar_left_inset(&mut self, inset: f32) {
+        self.status_left_inset = inset.max(0.0).min(self.w as f32 / 2.0);
+        self.dirty = true;
+    }
+
     pub fn theme(&self) -> Theme {
-        if self.state.dark {
+        let mut theme = if self.state.dark {
             Theme::dark(self.w, self.h, self.px_per_dp)
         } else {
             Theme::light(self.w, self.h, self.px_per_dp)
-        }
+        };
+        theme.m.status_x = theme.m.status_x.max(self.status_left_inset);
+        theme
     }
 
     pub fn screen(&self) -> Screen {

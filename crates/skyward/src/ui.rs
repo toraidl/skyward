@@ -1068,6 +1068,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     };
     let mut app = App::new(first, w, h, cfg.display.density as f32 / 160.0);
     app.set_screen_corners(cfg.display.corner_radius as f32);
+    app.set_status_bar_left_inset(cfg.display.status_bar_left_inset as f32);
     // The pages speak the language the system named with the work it asks
     // for, or else the one the installed system is built to start in.
     if let Some(locale) = request.locale.as_deref().or(info.locale.as_deref()) {
