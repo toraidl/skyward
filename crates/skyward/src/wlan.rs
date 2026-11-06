@@ -12,9 +12,10 @@ use skyward_net::reach::{self, Reach};
 use skyward_net::supplicant::{self, Bss, Control, Event as Told, Security};
 use skyward_net::wlan::{self, Joined, Link, Next, Power, Stage, Traffic, Wlan};
 use std::fs;
+use std::io::{self, Read};
 use std::net::Ipv4Addr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command as Process, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -695,9 +696,19 @@ fn place(file: &Firmware) -> Result<()> {
     let bytes = match &file.partition {
         None => fs::read(&file.path).with_context(|| format!("read {}", file.path))?,
         Some(partition) => {
-            let at = Path::new(PARTITIONS).join(partition);
+            let partition = if file.slotselect {
+                format!("{partition}{}", skyward_block::slot_suffix()?.context("WLAN firmware requires a booted slot")?)
+            } else {
+                partition.clone()
+            };
+            let at = Path::new(PARTITIONS).join(&partition);
             fs::create_dir_all(&at).with_context(|| format!("make {}", at.display()))?;
-            skyward_block::mount::mount_ro(&Path::new(skyward_block::BY_NAME).join(partition), &at)?;
+            let device = Path::new(skyward_block::BY_NAME).join(&partition);
+            if let Some(filesystem) = &file.filesystem {
+                skyward_block::mount::mount(&device, &at, filesystem, &["ro".into(), "nosuid".into(), "nodev".into(), "noexec".into()])?;
+            } else {
+                skyward_block::mount::mount_ro(&device, &at)?;
+            }
             let read = fs::read(at.join(&file.path)).with_context(|| format!("read {} on {partition}", file.path));
             skyward_block::mount::umount(&at)?;
             read?
@@ -728,15 +739,19 @@ fn start_supplicant(cfg: &Config, libraries: Option<&Path>) -> Result<Child> {
         path.push(dir.to_string_lossy().into_owned());
     }
     let mut child = Process::new(&cfg.supplicant)
+        // Errors only; never enable -K (key logging) or debug dumps.
+        .arg("-q")
         .args(["-i", &cfg.interface, "-D", "nl80211", "-c"])
         .arg(&settings)
         .env("LD_LIBRARY_PATH", path.join(":"))
         .current_dir("/")
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("start {}", cfg.supplicant))?;
+    capture(child.stdout.take().expect("stdout is piped"), "supplicant.stdout");
+    capture(child.stderr.take().expect("stderr is piped"), "supplicant.stderr");
     let until = Instant::now() + SOCKET_WAIT;
     while !socket.exists() {
         if let Some(status) = child.try_wait().context("look at wpa_supplicant")? {
@@ -749,6 +764,18 @@ fn start_supplicant(cfg: &Config, libraries: Option<&Path>) -> Result<Child> {
         thread::sleep(Duration::from_millis(100));
     }
     Ok(child)
+}
+
+/// Keep at most 64 KiB per stream and drain the rest so a noisy daemon
+/// cannot fill RAM or block on its pipe. No saved networks are loaded.
+fn capture(mut stream: impl Read + Send + 'static, name: &'static str) {
+    thread::spawn(move || {
+        let file = fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(Path::new(HOME).join(name));
+        if let Ok(mut file) = file {
+            let _ = io::copy(&mut stream.by_ref().take(65536), &mut file);
+        }
+        let _ = io::copy(&mut stream, &mut io::sink());
+    });
 }
 
 /// End the supplicant: asked to, where it can be, and killed after a while.

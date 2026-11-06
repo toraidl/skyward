@@ -18,6 +18,33 @@ corner_radius = 100
 # Leave another 24 physical pixels between that region and the clock.
 status_bar_left_inset = 189
 
+# QCA6390 is built into the recovery kernel. Stage firmware before telling
+# CNSS that the filesystem is ready; never borrow a module from another build.
+[wlan]
+modules = []
+writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+firmware = [
+    { name = "qca6390/amss20.bin", partition = "modem", slotselect = true, filesystem = "vfat", path = "image/qca6390/amss20.bin" },
+    { name = "qca6390/m3.bin", partition = "modem", slotselect = true, filesystem = "vfat", path = "image/qca6390/m3.bin" },
+    { name = "qca6390/bdwlan.elf", partition = "modem", slotselect = true, filesystem = "vfat", path = "image/qca6390/bdwlan.elf" },
+    { name = "wlan/qca_cld/qca6390/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/qca6390/WCNSS_qcom_cfg.ini" },
+    { name = "wlan/qca_cld/qca6390/wlan_mac.bin", partition = "persist", path = "qca6390/wlan_mac.bin" },
+]
+interface = "wlan0"
+supplicant = "/vendor/bin/hw/wpa_supplicant"
+libraries = ["/vendor/lib64", "/system/lib64"]
+hardware_services = [
+    "android.hardware.wifi.supplicant@1.0::ISupplicant/default",
+    "android.hardware.wifi.supplicant@1.1::ISupplicant/default",
+    "android.hardware.wifi.supplicant@1.2::ISupplicant/default",
+    "android.hardware.wifi.supplicant@1.3::ISupplicant/default",
+    "vendor.qti.hardware.wifi.supplicant@2.0::ISupplicantVendor/default",
+    "vendor.qti.hardware.wifi.supplicant@2.1::ISupplicantVendor/default",
+    "vendor.qti.hardware.wifi.supplicant@2.2::ISupplicantVendor/default",
+    "vendor.oplus.hardware.wifi.supplicant@2.0::IOplusSupplicant/default",
+]
+probe = "http://connectivitycheck.gstatic.com/generate_204"
+
 # /metadata keeps the key the data partition opens with and what libsnapshot
 # needs. The stock recovery mounts it as it starts; a recovery that replaces
 # its binary has to mount it itself, and before anything tries to open data.

@@ -122,7 +122,12 @@ pub struct Wlan {
     /// The service it registers with the service directory as it starts,
     /// which the directory takes only from a program the running system
     /// describes.
+    #[serde(default)]
     pub service: String,
+    /// Interfaces registered with hwservicemanager on older vendor builds.
+    /// Use these instead of the AIDL service above.
+    #[serde(default)]
+    pub hardware_services: Vec<String>,
     /// The page the stock system asks over plain HTTP to tell whether a
     /// network reaches the internet, which answers 204 with nothing.
     pub probe: String,
@@ -158,6 +163,12 @@ pub struct Firmware {
     /// read-only while the file is read.
     #[serde(default)]
     pub partition: Option<String>,
+    /// Read the copy belonging to the booted slot, such as modem_a.
+    #[serde(default)]
+    pub slotselect: bool,
+    /// Explicit type for firmware filesystems such as the modem's FAT image.
+    #[serde(default)]
+    pub filesystem: Option<String>,
 }
 
 /// The phone maker's update server, which the stock updater asks about the
@@ -584,8 +595,16 @@ impl DeviceConfig {
             );
         }
         if let Some(wlan) = &cfg.wlan {
+            ensure!(wlan.service.is_empty() != wlan.hardware_services.is_empty(), "[wlan] requires either service or hardware_services");
+            for service in &wlan.hardware_services {
+                ensure!(service.contains('@') && service.contains("::") && service.split_once('/').is_some_and(|(name, instance)| !name.is_empty() && !instance.is_empty()) && !service.contains(char::is_whitespace), "[wlan] invalid hardware service {service}");
+            }
             ensure!(wlan.probe.starts_with("http://"), "[wlan] probe: {} is not a plain HTTP address", wlan.probe);
             for file in &wlan.firmware {
+                ensure!(!file.slotselect || file.partition.is_some(), "[wlan] slotselect requires a firmware partition");
+                if let Some(fs) = &file.filesystem {
+                    ensure!(file.partition.is_some() && matches!(fs.as_str(), "vfat" | "ext4" | "f2fs" | "erofs"), "[wlan] invalid firmware filesystem {fs}");
+                }
                 let name = Path::new(&file.name);
                 let plain = name.components().all(|c| matches!(c, std::path::Component::Normal(_)));
                 ensure!(plain && !file.name.is_empty(), "[wlan] firmware: {} is not a name from the top of the loader's folders", file.name);
