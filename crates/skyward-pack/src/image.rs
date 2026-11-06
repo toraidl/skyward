@@ -76,16 +76,24 @@ impl BootImage {
                 header.kernel_size = u32::try_from(self.kernel.len()).context("kernel size")?;
                 header.ramdisk_size = u32::try_from(self.ramdisk.len()).context("ramdisk size")?;
                 header.second_bootloader_size = u32::try_from(self.second.len()).context("second stage bootloader size")?;
+                // A version 1 or 2 header says where in the image the
+                // recovery DTBO is, not where it is to be loaded. The
+                // bootloader reads it from the partition at exactly that
+                // place, so a ramdisk of another size moves it and the
+                // header has to say so.
+                let recovery_dtbo_offset = header.recovery_dtbo_position() as u64;
                 match &mut header.versioned {
                     HeaderV0Versioned::V0 => {
                         ensure!(self.recovery_dtbo.is_empty() && self.dtb.is_empty(), "a version 0 header holds no recovery DTBO or DTB");
                     }
-                    HeaderV0Versioned::V1 { recovery_dtbo_size, .. } => {
+                    HeaderV0Versioned::V1 { recovery_dtbo_size, recovery_dtbo_addr, .. } => {
                         ensure!(self.dtb.is_empty(), "a version 1 header holds no DTB");
                         *recovery_dtbo_size = u32::try_from(self.recovery_dtbo.len()).context("recovery DTBO size")?;
+                        *recovery_dtbo_addr = recovery_dtbo_offset;
                     }
-                    HeaderV0Versioned::V2 { recovery_dtbo_size, dtb_size, .. } => {
+                    HeaderV0Versioned::V2 { recovery_dtbo_size, recovery_dtbo_addr, dtb_size, .. } => {
                         *recovery_dtbo_size = u32::try_from(self.recovery_dtbo.len()).context("recovery DTBO size")?;
+                        *recovery_dtbo_addr = recovery_dtbo_offset;
                         *dtb_size = u32::try_from(self.dtb.len()).context("DTB size")?;
                     }
                 }
@@ -210,5 +218,23 @@ mod tests {
         let Header::V0(header) = &image.header else { unreachable!() };
         assert_eq!(&header.hash_digest[..20], hasher.finalize().as_slice());
         assert_eq!(&header.hash_digest[20..], &[0u8; 12]);
+    }
+
+    #[test]
+    fn the_recovery_dtbo_offset_follows_the_ramdisk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("recovery.img");
+        fs::write(&path, v2_image()).unwrap();
+        let mut image = BootImage::read(&path).unwrap();
+        // A ramdisk of another size moves everything after it.
+        image.ramdisk.resize(12000, 7);
+        let bytes = image.to_bytes().unwrap();
+        let out = dir.path().join("repacked.img");
+        fs::write(&out, &bytes).unwrap();
+        let back = BootImage::read(&out).unwrap();
+        let Header::V0(header) = &back.header else { unreachable!() };
+        let HeaderV0Versioned::V2 { recovery_dtbo_addr, .. } = header.versioned else { unreachable!() };
+        assert_eq!(recovery_dtbo_addr as usize, header.recovery_dtbo_position());
+        assert_eq!(&bytes[header.recovery_dtbo_position()..][..back.recovery_dtbo.len()], back.recovery_dtbo.as_slice());
     }
 }
