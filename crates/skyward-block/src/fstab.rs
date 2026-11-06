@@ -4,8 +4,15 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
-/// Where the phone's own partitions keep the table.
-pub const FILES: [&str; 2] = ["/vendor/etc/fstab.qcom", "/odm/etc/fstab.qcom"];
+/// The recovery copy is available even before vendor can be mounted. Its
+/// entries precede the installed tables so the stock recovery's data and
+/// metadata paths remain usable with the recovery kernel.
+pub const FILES: [&str; 4] = [
+    "/etc/recovery.fstab",
+    "/system/etc/recovery.fstab",
+    "/vendor/etc/fstab.qcom",
+    "/odm/etc/fstab.qcom",
+];
 
 /// One filesystem the phone knows about.
 #[derive(Debug, Clone, PartialEq, Eq)]
