@@ -259,6 +259,11 @@ struct Station {
 impl Station {
     fn run(&mut self, inbox: &Receiver<Inbox>, poked: &OwnedFd) {
         let mut told = self.state.clone();
+        // A network kept by an earlier boot is reason enough to have the
+        // radio up without being asked.
+        if fs::read_to_string(SAVED).ok().and_then(|text| Saved::read(&text)).is_some() {
+            self.command(Command::On);
+        }
         loop {
             let mut fds = vec![libc::pollfd { fd: poked.as_raw_fd(), events: libc::POLLIN, revents: 0 }];
             if let Some(r) = &self.running {
