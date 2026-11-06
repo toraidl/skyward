@@ -20,6 +20,10 @@ pub const SERVICES: [&str; 2] = [
     "android.hardware.keymaster@4.0::IKeymasterDevice",
 ];
 const INSTANCE: &str = "default";
+/// The name the calls this program makes are written under. Every one of
+/// them is a method the 4.0 interface declares, and a service of the later
+/// version takes them under that name.
+const TOKEN: &str = "android.hardware.keymaster@4.0::IKeymasterDevice";
 
 /// How each version numbers the calls this program makes. A service of the
 /// later version keeps the numbers of the earlier one.
@@ -49,11 +53,9 @@ const VERIFICATION_MAC: u64 = 40;
 const KEY_FORMAT_RAW: u32 = 3;
 const PURPOSE_DECRYPT: u32 = 1;
 const BLOCK_MODE_GCM: u64 = 32;
-const PADDING_NONE: u64 = 1;
 
 const TAG_PURPOSE: i32 = 536_870_913;
 const TAG_BLOCK_MODE: i32 = 536_870_916;
-const TAG_PADDING: i32 = 536_870_918;
 const TAG_MAC_LENGTH: i32 = 805_307_371;
 const TAG_APPLICATION_ID: i32 = -1_879_047_591;
 const TAG_NONCE: i32 = -1_879_047_191;
@@ -108,12 +110,12 @@ impl<'a> Keymaster<'a> {
     }
 
     pub fn hardware(&self) -> Result<Hardware> {
-        let reply = self.call(GET_HARDWARE_INFO, Message::call(self.interface), "ask the key service about itself")?;
+        let reply = self.call(GET_HARDWARE_INFO, Message::call(TOKEN), "ask the key service about itself")?;
         let mut read = Reply::new(&reply);
         read.status()?;
         let security_level = read.i32()?;
-        let name = read.text()?;
-        let author = read.text()?;
+        let name = read.string()?;
+        let author = read.string()?;
         Ok(Hardware { security_level, name, author })
     }
 
@@ -134,7 +136,8 @@ impl<'a> Keymaster<'a> {
     }
 
     fn export(&self, key: &[u8]) -> Result<Vec<u8>> {
-        let mut call = Message::call(self.interface);
+        let key = crate::plain_key_blob(key)?;
+        let mut call = Message::call(TOKEN);
         call.u32(KEY_FORMAT_RAW);
         call.bytes(key);
         call.bytes(&[]);
@@ -149,7 +152,8 @@ impl<'a> Keymaster<'a> {
     /// What the key service says a key may be used for: each entry is a tag
     /// and the number or length that came with it.
     pub fn authorizations(&self, key_blob: &[u8], app_id: &[u8]) -> Result<Vec<(i32, i64)>> {
-        let mut call = Message::call(self.interface);
+        let key_blob = crate::plain_key_blob(key_blob)?;
+        let mut call = Message::call(TOKEN);
         call.bytes(key_blob);
         call.bytes(app_id);
         call.bytes(&[]);
@@ -196,7 +200,6 @@ impl<'a> Keymaster<'a> {
     fn gcm_params<'b>(app_id: &'b [u8], nonce: &'b [u8]) -> Vec<Param<'b>> {
         let mut params = vec![
             Param { tag: TAG_BLOCK_MODE, value: Some(BLOCK_MODE_GCM), blob: None },
-            Param { tag: TAG_PADDING, value: Some(PADDING_NONE), blob: None },
             Param { tag: TAG_MAC_LENGTH, value: Some(128), blob: None },
         ];
         if !app_id.is_empty() {
@@ -208,7 +211,8 @@ impl<'a> Keymaster<'a> {
     }
 
     fn begin(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8], note: Option<&Token>) -> Result<u64> {
-        let mut call = Message::call(self.interface);
+        let key_blob = crate::plain_key_blob(key_blob)?;
+        let mut call = Message::call(TOKEN);
         call.u32(PURPOSE_DECRYPT);
         call.bytes(key_blob);
         let params = Self::gcm_params(app_id, nonce);
@@ -223,7 +227,7 @@ impl<'a> Keymaster<'a> {
     }
 
     fn update(&self, operation: u64, input: &[u8]) -> Result<Vec<u8>> {
-        let mut call = Message::call(self.interface);
+        let mut call = Message::call(TOKEN);
         call.u64(operation);
         Self::write_params(&mut call, &[]);
         call.bytes(input);
@@ -239,7 +243,7 @@ impl<'a> Keymaster<'a> {
     }
 
     fn finish(&self, operation: u64) -> Result<Vec<u8>> {
-        let mut call = Message::call(self.interface);
+        let mut call = Message::call(TOKEN);
         call.u64(operation);
         Self::write_params(&mut call, &[]);
         call.bytes(&[]);
@@ -255,7 +259,7 @@ impl<'a> Keymaster<'a> {
     }
 
     fn abort(&self, operation: u64) -> Result<()> {
-        let mut call = Message::call(self.interface);
+        let mut call = Message::call(TOKEN);
         call.u64(operation);
         let reply = self.call(ABORT, call, "drop the decryption")?;
         let mut read = Reply::new(&reply);
@@ -267,7 +271,8 @@ impl<'a> Keymaster<'a> {
     /// build. What it is bound to has to be given again, or the service
     /// cannot tell it is the right key.
     fn upgrade(&self, key_blob: &[u8], params: &[Param]) -> Result<Vec<u8>> {
-        let mut call = Message::call(self.interface);
+        let key_blob = crate::plain_key_blob(key_blob)?;
+        let mut call = Message::call(TOKEN);
         call.bytes(key_blob);
         Self::write_params(&mut call, params);
         let reply = self.call(UPGRADE_KEY, call, "renew the key")?;
@@ -438,6 +443,22 @@ impl<'a> Reply<'a> {
         Ok(String::from_utf16_lossy(&utf16))
     }
 
+    /// A string the phone's own code writes as a structure of its own: the
+    /// length it has and, in a buffer of its own, its bytes and a
+    /// terminator.
+    fn string(&mut self) -> Result<String> {
+        let string = self.address()?;
+        let chars = self.address()?;
+        let bytes = self.slice(chars);
+        let length = if string.at == 0 {
+            bytes.len()
+        } else {
+            let head = self.slice(Address { at: string.at, len: 16 });
+            u32::from_le_bytes(head[8..12].try_into().expect("four bytes")) as usize
+        };
+        Ok(String::from_utf8_lossy(&bytes[..length.min(bytes.len())]).into_owned())
+    }
+
     /// An address among the values.
     fn address(&mut self) -> Result<Address> {
         self.at = self.at.div_ceil(8) * 8;
@@ -485,8 +506,8 @@ impl<'a> Reply<'a> {
     fn params(&mut self) -> Result<Vec<Parameter>> {
         let frame = self.address()?;
         let elements = self.address()?;
-        let (count, elements_at) = self.frame_fields(frame).context("read the frame of the parameters")?;
-        let elements = Address { at: elements_at, len: elements.len };
+        let (count, _) = self.frame_fields(frame).context("read the frame of the parameters")?;
+        let elements = Address { at: elements.at, len: elements.len };
         let mut out = Vec::with_capacity(count);
         for index in 0..count {
             let at = elements.at + (index * PARAM_BYTES) as u64;
@@ -518,9 +539,8 @@ impl<'a> Reply<'a> {
         let mut out = Vec::new();
         for offset in [0usize, 16] {
             let count = u32::from_le_bytes(raw[offset + 8..offset + 12].try_into().expect("four bytes")) as usize;
-            let elements_at = u64::from_le_bytes(raw[offset..offset + 8].try_into().expect("eight bytes"));
             let elements = self.address()?;
-            let elements = Address { at: elements_at, len: elements.len };
+            let elements = Address { at: elements.at, len: elements.len };
             for index in 0..count {
                 let base_at = elements.at + (index * PARAM_BYTES) as u64;
                 let base = self.slice(Address { at: base_at, len: PARAM_BYTES as u64 });

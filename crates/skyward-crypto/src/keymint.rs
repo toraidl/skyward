@@ -167,6 +167,7 @@ impl<'a> KeyMintDevice<'a> {
     }
 
     fn convert(&self, key: &[u8]) -> Result<Vec<u8>> {
+        let key = crate::plain_key_blob(key)?;
         let mut call = Parcel::call(DEVICE);
         call.blob(key);
         let reply = self.device.transact(CONVERT_STORAGE_KEY, &call).context("make a storage key for this start")?;
@@ -178,6 +179,7 @@ impl<'a> KeyMintDevice<'a> {
     /// What the key service says a key may be used for: each entry is a tag
     /// and the number or length that came with it.
     pub fn authorizations(&self, key_blob: &[u8], app_id: &[u8]) -> Result<Vec<(i32, i64)>> {
+        let key_blob = crate::plain_key_blob(key_blob)?;
         let mut call = Parcel::call(DEVICE);
         call.blob(key_blob);
         call.blob(app_id);
@@ -255,6 +257,7 @@ impl<'a> KeyMintDevice<'a> {
 
     /// Open a decryption with the key service and keep hold of it.
     fn begin(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8], note: Option<&Token>) -> Result<Handle<'a>> {
+        let key_blob = crate::plain_key_blob(key_blob)?;
         let mut call = Parcel::call(DEVICE);
         call.i32(PURPOSE_DECRYPT);
         call.blob(key_blob);
@@ -289,6 +292,7 @@ impl<'a> KeyMintDevice<'a> {
     /// build. What it is bound to has to be given again, as `params` write
     /// it, or the service cannot tell it is the right key.
     fn upgrade(&self, key_blob: &[u8], params: impl FnOnce(&mut Parcel)) -> Result<Vec<u8>> {
+        let key_blob = crate::plain_key_blob(key_blob)?;
         let mut call = Parcel::call(DEVICE);
         call.blob(key_blob);
         params(&mut call);
