@@ -422,17 +422,14 @@ impl<'a> Reply<'a> {
     }
 
     fn i32(&mut self) -> Result<i32> {
-        self.at = self.at.div_ceil(4) * 4;
         Ok(i32::from_le_bytes(self.take(4)?.try_into().expect("four bytes")))
     }
 
     fn u32(&mut self) -> Result<u32> {
-        self.at = self.at.div_ceil(4) * 4;
         Ok(u32::from_le_bytes(self.take(4)?.try_into().expect("four bytes")))
     }
 
     fn u64(&mut self) -> Result<u64> {
-        self.at = self.at.div_ceil(8) * 8;
         Ok(u64::from_le_bytes(self.take(8)?.try_into().expect("eight bytes")))
     }
 
@@ -466,7 +463,6 @@ impl<'a> Reply<'a> {
 
     /// An address among the values.
     fn address(&mut self) -> Result<Address> {
-        self.at = self.at.div_ceil(8) * 8;
         let raw = self.take(ADDRESS_BYTES)?;
         let kind = u32::from_le_bytes(raw[0..4].try_into().expect("four bytes"));
         if kind != ADDRESS_MARK {
