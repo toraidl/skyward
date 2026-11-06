@@ -57,6 +57,13 @@ enum Cmd {
         /// Skyward built for the device (aarch64-linux-android).
         #[arg(long)]
         binary: PathBuf,
+        /// Fill a missing /system/bin/logd with a matching recovery binary.
+        #[arg(long)]
+        logd: Option<PathBuf>,
+        /// Fill a missing /system/lib64 dependency; repeat for each library.
+        /// Existing ramdisk libraries are never overwritten.
+        #[arg(long = "library")]
+        libraries: Vec<PathBuf>,
         /// The device configuration, devices/<codename>.toml.
         #[arg(long)]
         config: PathBuf,
@@ -111,7 +118,7 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read_kernel(&kernel)?;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, kernel, binary, config, font, mono, mono_license, diagnostics, out } => {
+        Cmd::Recovery { stock, kernel, binary, logd, libraries, config, font, mono, mono_license, diagnostics, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
             if let Some(kernel) = kernel {
@@ -126,6 +133,15 @@ fn main() -> Result<()> {
             let read = |p: &PathBuf| std::fs::read(p).with_context(|| format!("read {}", p.display()));
             skyward_config::DeviceConfig::load(&config)?;
             rd.replace(paths::RECOVERY, read(&binary)?)?;
+            if let Some(logd) = &logd {
+                ensure!(rd.entries.iter().any(|e| e.name.ends_with(".rc") && String::from_utf8_lossy(&e.data).lines().any(|l| l.trim_start().starts_with("service logd "))), "the stock ramdisk declares no logd service");
+                rd.add("system/bin/logd", 0o755, support_elf(logd)?)?;
+            }
+            for library in libraries {
+                let name = library.file_name().context("a recovery library has no file name")?.to_str().context("a recovery library's name is not UTF-8")?;
+                ensure!(name.ends_with(".so"), "{} is not named as a shared library", library.display());
+                rd.add(&format!("system/lib64/{name}"), 0o644, support_elf(&library)?)?;
+            }
             rd.add(paths::CONFIG, 0o644, read(&config)?)?;
             rd.add(paths::FONT, 0o644, read(&font)?)?;
             rd.add(paths::MONO, 0o644, read(&mono)?)?;
@@ -137,6 +153,12 @@ fn main() -> Result<()> {
             }
             disable_stock_recovery_ui(&mut rd)?;
             let mut rules = MTP_RC.to_vec();
+            if logd.is_some() {
+                // Its stock service belongs to class core, while recovery
+                // starts class default. USB state must not decide whether
+                // hardware-service diagnostics are available.
+                rules.extend_from_slice(b"\non boot\n    start logd\n");
+            }
             if diagnostics {
                 rd.add(paths::DIAG, 0o755, DIAG.to_vec())?;
                 rules.extend_from_slice(DIAG_RC);
@@ -176,6 +198,14 @@ fn main() -> Result<()> {
             }
         }
     }
+}
+
+/// Support assets run under the stock arm64 recovery loader. Reject a host
+/// executable or another ABI before it can be mistaken for a device asset.
+fn support_elf(path: &Path) -> Result<Vec<u8>> {
+    let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    ensure!(bytes.len() >= 64 && &bytes[..6] == b"\x7fELF\x02\x01" && bytes[18..20] == [183, 0], "{} is not a little-endian arm64 ELF", path.display());
+    Ok(bytes)
 }
 
 /// The partition a recovery is made on, as a full update package names it.
