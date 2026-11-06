@@ -15,6 +15,12 @@ density = 480
 diagonal = 6.55
 corner_radius = 100
 
+# /metadata keeps the key the data partition opens with and what libsnapshot
+# needs. The stock recovery mounts it as it starts; a recovery that replaces
+# its binary has to mount it itself, and before anything tries to open data.
+[partitions]
+mounted = ["metadata"]
+
 # The phone's hardware services, which the stock recovery starts only when
 # its own recovery binary sets a property as it decrypts. Skyward starts
 # them itself, in the order they depend on one another: the directory the
