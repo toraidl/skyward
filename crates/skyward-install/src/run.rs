@@ -8,7 +8,7 @@ use crate::adb::{self, Connection, Offer, Service};
 use crate::asked::Asked;
 use crate::blockmap::BlockMap;
 use crate::ffs::{Endpoints, Shared, Usb};
-use crate::fuse::{self, Fault, LocalFile, Mount};
+use crate::fuse::{self, Fault, LocalFile};
 use crate::image::{self, ImageKind};
 use crate::keep::Kept;
 use crate::ota::{self, Log, Status};
@@ -276,7 +276,7 @@ fn receive(ctx: &mut Context, mut conn: Connection<Endpoints>, offer: Offer, res
         }
     };
     let mount = mounted.serve(conn);
-    let done = install(ctx, &mount, offer.size).unwrap_or_else(Done::Error);
+    let done = install(ctx, offer.size).unwrap_or_else(Done::Error);
     let (mut conn, served) = mount.unmount();
     let outcome = conclude(done, served, ctx.origin);
     finish(&mut conn, ending(&outcome));
@@ -318,7 +318,7 @@ fn serve_local<S: fuse::Source + Send + 'static>(ctx: &mut Context, source: S, o
         Err(e) => return failed(e),
     };
     let mount = mounted.serve(source);
-    let done = install(ctx, &mount, offer.size).unwrap_or_else(Done::Error);
+    let done = install(ctx, offer.size).unwrap_or_else(Done::Error);
     let (_, served) = mount.unmount();
     conclude(done, served, ctx.origin)
 }
@@ -441,12 +441,12 @@ fn conclude(done: Done, served: Result<Option<Fault>>, origin: Origin) -> Outcom
     }
 }
 
-fn install<S>(ctx: &mut Context, mount: &Mount<S>, size: u64) -> Result<Done> {
+fn install(ctx: &mut Context, size: u64) -> Result<Done> {
     let file = File::open(fuse::PACKAGE).context("open the package")?;
     let package = package::identify(BufReader::with_capacity(1 << 16, file))?;
     let _ = kmsg(&format!("install: {}", describe(&package)));
     match package {
-        Package::Update(update) => update_system(ctx, mount, &update),
+        Package::Update(update) => update_system(ctx, &update),
         // The system asks for packages that install themselves, as Android's
         // own recovery takes nothing else; an image needs someone to say
         // where it goes.
@@ -497,7 +497,7 @@ fn describe(package: &Package) -> String {
     }
 }
 
-fn update_system<S>(ctx: &mut Context, mount: &Mount<S>, update: &Update) -> Result<Done> {
+fn update_system(ctx: &mut Context, update: &Update) -> Result<Done> {
     let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
     if let Err(refusal) = package::check(update, &phone(slot)?) {
         return Ok(Done::Decided(Outcome::Refused(refusal)));
@@ -533,7 +533,7 @@ fn update_system<S>(ctx: &mut Context, mount: &Mount<S>, update: &Update) -> Res
     if skyward_block::mount::is_mount_point(metadata)? {
         skyward_block::mount::umount(metadata)?;
     }
-    let code = apply(ctx, mount, update);
+    let code = apply(ctx, update);
     if let Err(e) = remount_metadata() {
         let _ = kmsg(&format!("install: /metadata not mounted again: {e:#}"));
     }
@@ -618,12 +618,13 @@ fn battery() -> Result<Option<Refusal>> {
 /// A line update_engine wrote that matters here.
 enum Line {
     Status(Status),
+    Progress(u32),
     Log(Log),
 }
 
 /// Run update_engine on the package, telling the screen how far it is,
 /// and give its exit code.
-fn apply<S>(ctx: &Context, mount: &Mount<S>, update: &Update) -> Result<i32> {
+fn apply(ctx: &Context, update: &Update) -> Result<i32> {
     let (status_read, status_write) = pipe(0)?;
     let status_fd = status_write.as_raw_fd();
     let mut command = std::process::Command::new(ota::PROGRAM);
@@ -652,6 +653,8 @@ fn apply<S>(ctx: &Context, mount: &Mount<S>, update: &Update) -> Result<i32> {
         lines(File::from(status_read), |line| {
             if let Some(s) = ota::status(line) {
                 let _ = status_tx.send(Line::Status(s));
+            } else if let Some(progress) = ota::progress(line) {
+                let _ = status_tx.send(Line::Progress(progress));
             }
             Ok(())
         })
@@ -670,10 +673,12 @@ fn apply<S>(ctx: &Context, mount: &Mount<S>, update: &Update) -> Result<i32> {
     ctx.send(Event::Progress(stage.clone()));
     let mut told = Instant::now();
     let (mut partitions, mut verifying, mut finishing, mut error) = (0, None, false, None);
+    let mut written = 0;
     loop {
         match rx.recv_timeout(PROGRESS_EVERY) {
             Ok(Line::Status(Status::Step(step))) => finishing = step == 2,
             Ok(Line::Status(Status::Error(code))) => error = Some(code),
+            Ok(Line::Progress(progress)) => written = progress,
             Ok(Line::Log(Log::Partition(_))) => partitions += 1,
             Ok(Line::Log(Log::Overwriting)) => ctx.send(Event::Overwriting),
             Ok(Line::Log(Log::Hashing { index, partition })) => verifying = Some((index, partition)),
@@ -686,7 +691,10 @@ fn apply<S>(ctx: &Context, mount: &Mount<S>, update: &Update) -> Result<i32> {
         } else if let Some((index, partition)) = &verifying {
             Stage::Verifying { index: *index, count: partitions.max(index + 1), partition: partition.clone() }
         } else {
-            Stage::Writing { done: mount.served().saturating_sub(update.payload_offset).min(total), total }
+            // FUSE tracks the furthest read, not bytes applied: examining
+            // the ZIP directory can reach its end before writing starts.
+            let done = (u128::from(total) * u128::from(written) / u128::from(ota::PROGRESS_FULL)) as u64;
+            Stage::Writing { done, total }
         };
         let moved_on = std::mem::discriminant(&now) != std::mem::discriminant(&stage);
         if now != stage && (moved_on || told.elapsed() >= PROGRESS_EVERY) {

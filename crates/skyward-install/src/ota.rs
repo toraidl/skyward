@@ -36,6 +36,19 @@ pub fn status(line: &str) -> Option<Status> {
     code.split_whitespace().next()?.parse().ok().map(Status::Error)
 }
 
+/// Units in a complete `set_progress` report. These reports come from
+/// the engine's current stage, independently of package reads over FUSE.
+pub const PROGRESS_FULL: u32 = 10_000;
+
+/// Progress of the engine's current stage, as units of [`PROGRESS_FULL`].
+pub fn progress(line: &str) -> Option<u32> {
+    let fraction: f64 = line.strip_prefix("set_progress ")?.trim().parse().ok()?;
+    if !fraction.is_finite() || !(0.0..=1.0).contains(&fraction) {
+        return None;
+    }
+    Some((fraction * f64::from(PROGRESS_FULL)).round() as u32)
+}
+
 /// What its log on stderr tells beyond the status lines.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Log {
