@@ -539,12 +539,16 @@ fn update_system(ctx: &mut Context, update: &Update) -> Result<Done> {
     }
     Ok(match code? {
         0 => {
+            ota::mark(true);
             if let Some(kept) = &kept {
                 reflash(ctx, kept, Ok(slot.other()));
             }
             Done::Decided(Outcome::Installed { slot: slot.other(), wipe })
         }
-        code => Done::Engine(code),
+        code => {
+            ota::mark(false);
+            Done::Engine(code)
+        }
     })
 }
 

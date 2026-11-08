@@ -2,9 +2,45 @@
 //! update package: how it is started, and what it reports while it works.
 
 use crate::package::Update;
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
 
 /// Where the recovery ramdisk keeps it.
 pub const PROGRAM: &str = "/system/bin/update_engine_sideload";
+
+/// Where the phone's update framework looks for how the last update went.
+/// Both spellings are written: the framework reads the one under the cache
+/// partition, and newer code reads the one under user data.
+pub const INTENT: [&str; 2] = ["/data/cache/recovery/intent", "/cache/recovery/intent"];
+
+/// What the framework reads: `0` for an update that went through, `1` for
+/// one that did not.
+pub fn intent(success: bool) -> &'static str {
+    if success {
+        "0"
+    } else {
+        "1"
+    }
+}
+
+/// Tell the framework how the update went. The engine writes this itself
+/// once it switches slots; an update written over the slot the phone runs
+/// from never switches, so the recovery writes it instead.
+pub fn mark(success: bool) {
+    let value = intent(success);
+    for at in INTENT {
+        let at = Path::new(at);
+        if let Some(folder) = at.parent() {
+            let _ = fs::create_dir_all(folder);
+        }
+        if fs::write(at, value).is_ok() {
+            // Readable to the framework, which runs as system with cache.
+            let _ = std::os::unix::fs::chown(at, Some(0), Some(2001));
+            let _ = fs::set_permissions(at, fs::Permissions::from_mode(0o664));
+        }
+    }
+}
 
 /// Its arguments for `update`, read from the file `package`; it writes
 /// its status lines to `status_fd`.
@@ -181,5 +217,11 @@ mod tests {
         assert_eq!(Trouble::of(9), Trouble::Transfer);
         assert_eq!(Trouble::of(60), Trouble::NoSpace);
         assert_eq!(Trouble::of(1), Trouble::Other);
+    }
+
+    #[test]
+    fn the_framework_reads_zero_for_an_update_that_went_through() {
+        assert_eq!(intent(true), "0");
+        assert_eq!(intent(false), "1");
     }
 }
