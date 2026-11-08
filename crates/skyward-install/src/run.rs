@@ -533,17 +533,21 @@ fn update_system(ctx: &mut Context, update: &Update) -> Result<Done> {
     if skyward_block::mount::is_mount_point(metadata)? {
         skyward_block::mount::umount(metadata)?;
     }
-    let code = apply(ctx, update);
+    let applied = apply(ctx, update);
     if let Err(e) = remount_metadata() {
         let _ = kmsg(&format!("install: /metadata not mounted again: {e:#}"));
     }
-    Ok(match code? {
+    let (code, overwriting) = applied?;
+    Ok(match code {
         0 => {
             ota::mark(true);
+            // An update that overwrote the slot the phone runs from starts
+            // from that same slot; one written aside starts from the other.
+            let installed = if overwriting { slot } else { slot.other() };
             if let Some(kept) = &kept {
-                reflash(ctx, kept, Ok(slot.other()));
+                reflash(ctx, kept, Ok(installed));
             }
-            Done::Decided(Outcome::Installed { slot: slot.other(), wipe })
+            Done::Decided(Outcome::Installed { slot: installed, wipe })
         }
         code => {
             ota::mark(false);
@@ -628,7 +632,7 @@ enum Line {
 
 /// Run update_engine on the package, telling the screen how far it is,
 /// and give its exit code.
-fn apply(ctx: &Context, update: &Update) -> Result<i32> {
+fn apply(ctx: &Context, update: &Update) -> Result<(i32, bool)> {
     // The update engine writes OnePlus's reserve entry into a file inside
     // user data, so the file and the names that reach it come first.
     if let Err(e) = crate::reserve::prepare() {
@@ -681,7 +685,7 @@ fn apply(ctx: &Context, update: &Update) -> Result<i32> {
     let mut stage = Stage::Writing { done: 0, total };
     ctx.send(Event::Progress(stage.clone()));
     let mut told = Instant::now();
-    let (mut partitions, mut verifying, mut finishing, mut error) = (0, None, false, None);
+    let (mut partitions, mut verifying, mut finishing, mut error, mut overwriting) = (0, None, false, None, false);
     let mut written = 0;
     loop {
         match rx.recv_timeout(PROGRESS_EVERY) {
@@ -689,7 +693,12 @@ fn apply(ctx: &Context, update: &Update) -> Result<i32> {
             Ok(Line::Status(Status::Error(code))) => error = Some(code),
             Ok(Line::Progress(progress)) => written = progress,
             Ok(Line::Log(Log::Partition(_))) => partitions += 1,
-            Ok(Line::Log(Log::Overwriting)) => ctx.send(Event::Overwriting),
+            Ok(Line::Log(Log::Overwriting)) => {
+                // Super has no room for a snapshot of the next slot, so the
+                // package is written over the slot the phone runs from.
+                overwriting = true;
+                ctx.send(Event::Overwriting);
+            }
             Ok(Line::Log(Log::Hashing { index, partition })) => verifying = Some((index, partition)),
             Err(RecvTimeoutError::Timeout) => {}
             // Both outputs closed: the program has ended.
@@ -716,8 +725,8 @@ fn apply(ctx: &Context, update: &Update) -> Result<i32> {
     status.join().expect("the status reader does not panic").context("read update_engine's status")?;
     logged.join().expect("the log reader does not panic").context("read update_engine's log")?;
     match (ended.code(), error) {
-        (_, Some(code)) => Ok(code),
-        (Some(code), None) => Ok(code),
+        (_, Some(code)) => Ok((code, overwriting)),
+        (Some(code), None) => Ok((code, overwriting)),
         (None, None) => bail!("update_engine was ended by {ended}"),
     }
 }
