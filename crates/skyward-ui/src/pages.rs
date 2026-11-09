@@ -483,8 +483,9 @@ fn about_coloros(cx: &Ctx) -> Frame {
         Standing::None => l.pick(["恢复模式", "恢復模式", "Recovery"]),
         standing => fmt::update_value(l, standing),
     };
-    let hero_bottom =
-        widgets::hero_card(&mut c, t, f, top, m.dp(300.0), "Skyward", VERSION, AUTHOR, note);
+    // The stock hero is square, as tall as the card is wide.
+    let side = m.w as f32 - m.margin * 2.0;
+    let hero_bottom = widgets::hero_card(&mut c, t, f, top, side, "Skyward", VERSION, AUTHOR, note);
     let (out, _, bottom) = about_cards(cx, &mut c, hero_bottom + m.card_gap);
     Frame::new(t, fit(c, t, bottom), out, l.pick(ABOUT), top)
 }

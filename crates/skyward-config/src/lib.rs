@@ -12,6 +12,8 @@ pub mod ramdisk {
     /// OPPO Sans in the internal ColorOS ones. It travels under a neutral
     /// name so the image does not depend on which face was packed.
     pub const FONT: &str = "skyward/ui.ttf";
+    /// The About page's hero art, when the build carries one.
+    pub const HERO: &str = "skyward/hero.png";
     /// The terminal's monospaced typeface.
     pub const MONO: &str = "skyward/KirkMono-Regular.ttf";
     /// The monospaced typeface's licence, which travels with every copy of

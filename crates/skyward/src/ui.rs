@@ -1159,6 +1159,17 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     let mut surface = KmsSurface::open("/dev/dri/card0")?;
     let (w, h) = surface.size();
     eprintln!("display {}", surface.describe());
+    // The About page's hero art, when the image carries one. Without it the
+    // page draws its own field.
+    let hero = Path::new("/skyward/hero.png");
+    if hero.exists() {
+        let ppd = cfg.display.density as f32 / 160.0;
+        let side = (w as f32 - 32.0 * ppd).round() as u32;
+        match skyward_ui::hero::load(hero, side, side, 28.0 * ppd) {
+            Ok(art) => skyward_ui::hero::install(art),
+            Err(e) => eprintln!("About hero art: {e}"),
+        }
+    }
     let mut inputs = Inputs::open(w, h, cfg.touch.writes.clone())?;
     let started = Instant::now();
     let mut touch_known = false;

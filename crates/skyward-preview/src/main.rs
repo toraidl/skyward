@@ -154,6 +154,13 @@ fn main() -> Result<()> {
     let cfg = DeviceConfig::load(config)?;
     let (w, h) = (cfg.display.width, cfg.display.height);
     let ppd = cfg.display.density as f32 / 160.0;
+    if let Ok(art) = std::env::var("SKYWARD_HERO") {
+        let side = (w as f32 - 32.0 * ppd).round() as u32;
+        match skyward_ui::hero::load(Path::new(&art), side, side, 28.0 * ppd) {
+            Ok(art) => skyward_ui::hero::install(art),
+            Err(e) => eprintln!("About hero art: {e}"),
+        }
+    }
     let light = Theme::styled(design, false, w, h, ppd);
 
     match args.get(2).map(String::as_str) {

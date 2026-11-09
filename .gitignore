@@ -19,3 +19,7 @@ notes/
 # OPPO Sans is OPPO's. Internal ColorOS builds take it from their own
 # device and pass it to the packer; it is never committed or published.
 /resources/fonts/OPPOSans4.0SC-VF.ttf
+
+# ColorOS's About hero art is OPPO's; internal builds pass it to the
+# packer and never publish it.
+/resources/hero/

@@ -76,6 +76,11 @@ enum Cmd {
         /// The UI typeface.
         #[arg(long)]
         font: PathBuf,
+        /// The About page's hero art, a PNG the image carries. Internal
+        /// ColorOS builds pass OPPO's own artwork here; without it the page
+        /// draws its field.
+        #[arg(long)]
+        hero: Option<PathBuf>,
         /// The terminal's monospaced typeface.
         #[arg(long)]
         mono: PathBuf,
@@ -124,7 +129,7 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read_kernel(&kernel)?;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, kernel, binary, logd, update_engine_root, libraries, config, font, mono, mono_license, diagnostics, out } => {
+        Cmd::Recovery { stock, kernel, binary, logd, update_engine_root, libraries, config, font, hero, mono, mono_license, diagnostics, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
             if let Some(kernel) = kernel {
@@ -153,6 +158,9 @@ fn main() -> Result<()> {
             }
             rd.add(paths::CONFIG, 0o644, read(&config)?)?;
             rd.add(paths::FONT, 0o644, read(&font)?)?;
+            if let Some(hero) = hero {
+                rd.add(paths::HERO, 0o644, read(&hero)?)?;
+            }
             rd.add(paths::MONO, 0o644, read(&mono)?)?;
             rd.add(paths::MONO_LICENSE, 0o644, read(&mono_license)?)?;
             // A stock ramdisk may run logd without any scheduling profiles,
