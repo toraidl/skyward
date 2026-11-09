@@ -36,6 +36,13 @@ pub fn set_mtp(on: bool) {
 /// also waits for adbd to be gone, so its function is free.
 pub fn set(config: &str, timeout: Duration) -> Result<()> {
     set_prop("sys.usb.config", config)?;
+    if config == "mtp,adb" {
+        // No rule in the recovery names both functions and says the port
+        // is up, so this does it and then tells the property other
+        // programs wait on.
+        name_mtp(timeout)?;
+        set_prop("sys.usb.state", config)?;
+    }
     wait_prop("sys.usb.state", config, timeout)?;
     if config == "none" {
         let start = Instant::now();
@@ -43,9 +50,6 @@ pub fn set(config: &str, timeout: Duration) -> Result<()> {
             ensure!(start.elapsed() < timeout, "adbd still runs {} ms after the port went to none", timeout.as_millis());
             thread::sleep(Duration::from_millis(10));
         }
-    }
-    if config == "mtp,adb" {
-        name_mtp(timeout)?;
     }
     Ok(())
 }
