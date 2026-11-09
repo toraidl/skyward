@@ -1155,7 +1155,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
         return Err(anyhow!("{}: [display] density is required to lay out the UI", cfg.device.codename));
     }
     let mut info = skyward_info::collect(cfg)?;
-    let fonts = Fonts::load(font, 0, mono)?;
+    let fonts = Fonts::load_suited(font, 0, mono)?;
     let mut surface = KmsSurface::open("/dev/dri/card0")?;
     let (w, h) = surface.size();
     eprintln!("display {}", surface.describe());

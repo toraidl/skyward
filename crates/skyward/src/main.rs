@@ -194,7 +194,7 @@ enum Cmd {
     Ui {
         #[arg(long, default_value = "/skyward/device.toml")]
         config: std::path::PathBuf,
-        #[arg(long, default_value = "/skyward/MiSansVF.ttf")]
+        #[arg(long, default_value = "/skyward/ui.ttf")]
         font: std::path::PathBuf,
         /// The terminal's monospaced typeface.
         #[arg(long, default_value = "/skyward/KirkMono-Regular.ttf")]

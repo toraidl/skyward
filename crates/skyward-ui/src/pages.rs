@@ -626,7 +626,7 @@ pub fn specs(cx: &Ctx) -> Frame {
     y = widgets::info_card(&mut c, t, f, y + gap, &[(l.pick(["机身存储", "內建儲存空間", "Internal storage"]), storage)]);
     let links = widgets::list(&mut c, t, f, y + gap, &[
         Row::new(l.pick(LICENSE)).trail(Trail::Value("GPL-3.0")),
-        Row::new(l.pick(FONTS)).trail(Trail::Value("MiSans")),
+        Row::new(l.pick(FONTS)).trail(Trail::Value(f.info.family.as_str())),
     ]);
     out.extend(hits(&links.rows, &[Action::Open(Screen::License), Action::Open(Screen::FontLicense)]));
     Frame::new(t, fit(c, t, links.bottom), out, l.pick(SPECS), top)
@@ -3310,17 +3310,27 @@ pub fn font_license(cx: &Ctx) -> Frame {
     let top = t.m.content_top;
     let (typeface, version, copyright) = (l.pick(["字体", "字型", "Typeface"]), l.pick(["版本", "版本", "Version"]), l.pick(["版权", "版權", "Copyright"]));
     let y = widgets::section_first(&mut c, t, f, top, l.pick(["界面文字", "介面文字", "Interface text"]));
-    let y = widgets::info_card(&mut c, t, f, y, &[
-        (typeface, f.info.family.clone()),
-        (version, f.info.version.clone()),
-        (copyright, f.info.copyright.clone().expect("MiSans names its copyright holder")),
-    ]);
-    let misans = l.pick([
-        "界面文字使用小米 MiSans 字体，依据《MiSans 字体知识产权许可协议》免费使用。字体文件未经修改，仅随 Skyward 提供，不单独分发。\n\n协议全文可在 MiSans 官方网站查看。",
-        "介面文字使用小米 MiSans 字型，依據《MiSans 字體知識產權許可協議》免費使用。字型檔案未經修改，僅隨 Skyward 提供，不單獨散布。\n\n協議全文可在 MiSans 官方網站查看。",
-        "The interface text is set in Xiaomi's MiSans, used free of charge under the MiSans Font Intellectual Property License Agreement. The font files are unchanged, and come with Skyward alone, never on their own.\n\nThe agreement in full is on the MiSans website.",
-    ]);
-    let y = widgets::paragraph(&mut c, t, f, y + t.m.dp(4.0), misans);
+    let mut faces = vec![(typeface, f.info.family.clone()), (version, f.info.version.clone())];
+    if let Some(holder) = f.info.copyright.clone() {
+        faces.push((copyright, holder));
+    }
+    let y = widgets::info_card(&mut c, t, f, y, &faces);
+    // OPPO Sans carries no copyright line of its own; say plainly where it
+    // came from and that these builds keep it to themselves.
+    let words = if f.info.family.starts_with("OPPO") {
+        l.pick([
+            "界面文字使用 OPPO Sans 4.0，取自 ColorOS 系统。仅供内部测试构建使用，字体不单独分发。",
+            "介面文字使用 OPPO Sans 4.0，取自 ColorOS 系統。僅供內部測試組建使用，字型不單獨散布。",
+            "The interface text is set in OPPO Sans 4.0, taken from ColorOS. These are internal test builds, and the font is never distributed on its own.",
+        ])
+    } else {
+        l.pick([
+            "界面文字使用小米 MiSans 字体，依据《MiSans 字体知识产权许可协议》免费使用。字体文件未经修改，仅随 Skyward 提供，不单独分发。\n\n协议全文可在 MiSans 官方网站查看。",
+            "介面文字使用小米 MiSans 字型，依據《MiSans 字體知識產權許可協議》免費使用。字型檔案未經修改，僅隨 Skyward 提供，不單獨散布。\n\n協議全文可在 MiSans 官方網站查看。",
+            "The interface text is set in Xiaomi's MiSans, used free of charge under the MiSans Font Intellectual Property License Agreement. The font files are unchanged, and come with Skyward alone, never on their own.\n\nThe agreement in full is on the MiSans website.",
+        ])
+    };
+    let y = widgets::paragraph(&mut c, t, f, y + t.m.dp(4.0), words);
     let y = widgets::section(&mut c, t, f, y, l.pick(["终端文字", "終端機文字", "Terminal text"]));
     let holders: Vec<&str> = MONO_LICENSE.lines().take_while(|l| l.starts_with("Copyright")).collect();
     let y = widgets::info_card(&mut c, t, f, y, &[

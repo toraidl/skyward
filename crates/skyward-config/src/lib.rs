@@ -8,8 +8,10 @@ use std::path::Path;
 pub mod ramdisk {
     /// The device configuration, copied from `devices/<codename>.toml`.
     pub const CONFIG: &str = "skyward/device.toml";
-    /// The UI typeface.
-    pub const FONT: &str = "skyward/MiSansVF.ttf";
+    /// The UI typeface the build was given: MiSans in the public builds,
+    /// OPPO Sans in the internal ColorOS ones. It travels under a neutral
+    /// name so the image does not depend on which face was packed.
+    pub const FONT: &str = "skyward/ui.ttf";
     /// The terminal's monospaced typeface.
     pub const MONO: &str = "skyward/KirkMono-Regular.ttf";
     /// The monospaced typeface's licence, which travels with every copy of

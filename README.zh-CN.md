@@ -111,6 +111,16 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo ndk -t arm64-v8a --platform 30 clippy -p skyward -p skyward-install -- -D warnings
 ```
 
+### 内部 ColorOS 构建
+
+内部 ColorOS 构建的界面文字使用 OPPO Sans 4.0。字体版权归 OPPO 所有，不随本仓库分发；请从你自己的 ColorOS 设备取出，并通过打包工具的 `--font` 传入：
+
+```sh
+adb pull /system/fonts/SysSans-Hans-Regular.ttf OPPOSans4.0SC-VF.ttf
+```
+
+OPPO 允许个人和企业免费使用该字体（含商业用途），条件是不得改编或二次开发、不得售卖字体、不得通过其他渠道提供下载、不得用于违法用途。带该字体的镜像请只在内部使用，不要公开分发。
+
 `skyward-preview` 无需手机，在电脑上把页面绘制成 PNG 文件：每个页面完整绘制成长截图的样子，覆盖它可能处于的各种状态，另外还有触摸和动画过程中某些时刻的屏幕。`--lang` 按照地区代码选择语言，例如 `en` 或者 `zh-TW`：
 
 ```sh

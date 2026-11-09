@@ -141,7 +141,7 @@ fn main() -> Result<()> {
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let font_path = font_path()?;
-    let fonts = Fonts::load(&font_path, 0, root.join("resources/fonts/KirkMono-Regular.ttf"))?;
+    let fonts = Fonts::load_suited(&font_path, 0, root.join("resources/fonts/KirkMono-Regular.ttf"))?;
     eprintln!("font: {}", font_path.display());
     for (tag, min, def, max) in fonts.axes() {
         eprintln!("axis {tag}: {min}..{max} (default {def})");
@@ -1552,9 +1552,19 @@ fn font_path() -> Result<PathBuf> {
     if let Ok(p) = std::env::var("SKYWARD_FONT") {
         return Ok(PathBuf::from(p));
     }
-    let bundled = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../resources/fonts/MiSansVF.ttf");
-    if bundled.exists() {
-        return Ok(bundled);
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../resources/fonts");
+    // OPPO Sans is not carried by the repository; a checkout with one beside
+    // the sources previews ColorOS in it, and falls back to MiSans without.
+    let faces: [&str; 2] = if style() == Style::ColorOs {
+        ["OPPOSans4.0SC-VF.ttf", "MiSansVF.ttf"]
+    } else {
+        ["MiSansVF.ttf", "OPPOSans4.0SC-VF.ttf"]
+    };
+    for face in faces {
+        let bundled = dir.join(face);
+        if bundled.exists() {
+            return Ok(bundled);
+        }
     }
     for p in ["/System/Library/Fonts/STHeiti Medium.ttc", "/System/Library/Fonts/Hiragino Sans GB.ttc"] {
         if Path::new(p).exists() {

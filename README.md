@@ -127,6 +127,21 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo ndk -t arm64-v8a --platform 30 clippy -p skyward -p skyward-install -- -D warnings
 ```
 
+### Internal ColorOS builds
+
+The internal ColorOS builds set the interface in OPPO Sans 4.0, which is OPPO's
+and is not part of this repository. Take it from your own ColorOS device and pass
+it to the packer as `--font`:
+
+```sh
+adb pull /system/fonts/SysSans-Hans-Regular.ttf OPPOSans4.0SC-VF.ttf
+```
+
+OPPO allows the font to be used free of charge, commercial use included, on the
+terms that it is not changed or built upon, not sold, not offered for download
+through another channel, and not used unlawfully. Keep images that carry it to
+yourself; do not publish them.
+
 `skyward-preview` draws the pages on the computer, as PNG files, without a phone:
 each page whole, as a long screenshot shows it, in the states it can be in, and the
 screen at moments of touches and motion. `--lang` picks the language by a locale

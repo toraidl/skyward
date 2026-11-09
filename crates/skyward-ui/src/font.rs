@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 
-/// One weight instance of a typeface. MiSans ships as a variable font, so
-/// every UI weight is the same file with a different `wght` coordinate.
+/// One weight instance of a typeface. The UI face ships as a variable font,
+/// so every weight is the same file with a different `wght` coordinate.
 pub struct Face {
     pub(crate) font: FontRef<'static>,
     upem: f32,
@@ -186,6 +186,22 @@ pub const STOCK_WEIGHTS: Weights = Weights {
     display: 480.0,
 };
 
+/// `wght` per text role for OPPO Sans 4.0, the face ColorOS sets its own
+/// interface in: regular for body text, medium for rows and titles, and a
+/// heavier lean for badges and the status bar.
+pub const OPPO_WEIGHTS: Weights = Weights {
+    title: 560.0,
+    heading: 500.0,
+    label: 500.0,
+    body: 400.0,
+    value: 400.0,
+    badge: 600.0,
+    status: 600.0,
+    strong: 600.0,
+    speed: 700.0,
+    display: 500.0,
+};
+
 pub struct Fonts {
     /// Large page title.
     pub title: Face,
@@ -258,7 +274,20 @@ impl Fonts {
     pub fn load_with(path: impl AsRef<Path>, index: u32, mono: impl AsRef<Path>, w: &Weights) -> Result<Self> {
         // One copy of the bytes backs every weight instance.
         let data = leak(path.as_ref())?;
-        let mono_data = leak(mono.as_ref())?;
+        Self::from_data(data, index, mono.as_ref(), w)
+    }
+
+    /// Load the UI typeface with the weight set its family asks for: OPPO
+    /// Sans's own when it is that face, the set fitted on Xiaomi's
+    /// screenshots otherwise, so a build may pass either file.
+    pub fn load_suited(path: impl AsRef<Path>, index: u32, mono: impl AsRef<Path>) -> Result<Self> {
+        let data = leak(path.as_ref())?;
+        let weights = if FontInfo::read(data, index)?.family.starts_with("OPPO") { &OPPO_WEIGHTS } else { &STOCK_WEIGHTS };
+        Self::from_data(data, index, mono.as_ref(), weights)
+    }
+
+    fn from_data(data: &'static [u8], index: u32, mono: &Path, w: &Weights) -> Result<Self> {
+        let mono_data = leak(mono)?;
         let face = |wght: f32| Face::new(data, index, wght);
         Ok(Fonts {
             title: face(w.title)?,
