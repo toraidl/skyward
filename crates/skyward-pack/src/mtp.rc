@@ -20,21 +20,11 @@ on fs && property:sys.usb.configfs=1
 on property:sys.usb.config=mtp,adb
     start adbd
 
-on property:sys.usb.config=mtp,adb && property:sys.usb.ffs.ready=1 && property:sys.usb.ffs.mtp.ready=1 && property:sys.usb.configfs=1
-    # The ask for adb above already bound a configuration whose f1 names
-    # adb. configfs will not replace that link while the controller holds
-    # it: an rm leaves an empty folder behind and the symlink then fails,
-    # so the host is offered two adb interfaces and no file transfer.
-    # Unbind first, then name the links afresh.
-    write /config/usb_gadget/g1/UDC ""
-    rm /config/usb_gadget/g1/configs/b.1/f1
-    rm /config/usb_gadget/g1/configs/b.1/f2
-    write /config/usb_gadget/g1/idProduct 0x4EE2
-    write /config/usb_gadget/g1/configs/b.1/strings/0x409/configuration "mtp_adb"
-    symlink /config/usb_gadget/g1/functions/ffs.mtp /config/usb_gadget/g1/configs/b.1/f1
-    symlink /config/usb_gadget/g1/functions/ffs.adb /config/usb_gadget/g1/configs/b.1/f2
-    write /config/usb_gadget/g1/UDC ${sys.usb.controller}
-    setprop sys.usb.state ${sys.usb.config}
+# Naming the MTP function in the first link is left to Skyward, which does
+# it once the port has settled on mtp,adb: a rule here fires again on every
+# rebind, because taking the port down makes adbd write its function's
+# readiness again, and the port is left being rebuilt in a loop. Skyward
+# unbinds, renames both links and binds, and reads the first one back.
 
 # The stock rules take the first function off; this takes the second.
 on property:sys.usb.config=none && property:sys.usb.configfs=1
