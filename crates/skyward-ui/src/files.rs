@@ -5,7 +5,7 @@ use crate::fmt;
 use crate::font::{Face, Fonts};
 use crate::geom::Rect;
 use crate::lang::Lang;
-use crate::theme::Theme;
+use crate::theme::{Style, Theme};
 use crate::widgets;
 use std::f32::consts::FRAC_PI_2;
 use std::path::{Component, Path};
@@ -62,6 +62,22 @@ struct Palette {
 }
 
 fn palette(t: &Theme) -> Palette {
+    if t.style == Style::ColorOs {
+        // The stock file manager sets a white page under the list whatever
+        // the page behind it, with the path in the page's own grey.
+        return Palette {
+            page: t.pal.card,
+            name: t.pal.text,
+            line: t.pal.value,
+            note: t.pal.subtitle,
+            chevron: t.pal.chevron,
+            pill: t.pal.bg,
+            pill_text: t.pal.subtitle,
+            here: Rgba::rgb(255, 244, 222),
+            here_text: Rgba::rgb(214, 138, 20),
+            arrow: t.pal.chevron,
+        };
+    }
     if t.dark {
         Palette {
             page: Rgba::rgb(0, 0, 0),

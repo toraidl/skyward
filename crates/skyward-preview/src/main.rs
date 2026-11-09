@@ -188,9 +188,13 @@ fn main() -> Result<()> {
             "install" => Screen::Install,
             "mount" => Screen::Mount,
             "backup" => Screen::Backup,
+            "files" => Screen::Files,
             other => return Err(anyhow!("--screen does not know {other}")),
         };
         let mut app = opened(screen, w, h, ppd);
+        if screen == Screen::Files {
+            app.set_files("/system/bin".into(), Ok(sample_bin()), LISTED);
+        }
         app.set_screen_corners(cfg.display.corner_radius as f32);
         app.set_status_bar_left_inset(cfg.display.status_bar_left_inset as f32);
         // The About page's field is made on the first tick.

@@ -4150,7 +4150,7 @@ impl App {
         }
         if let Some((glyph, action)) = frame.button {
             let (_, chip, x, y) = self.button_chip.as_ref().expect("a page's round button is drawn with its chip");
-            out.lay(chip, *x, *y, bar);
+            out.lay(chip, *x, *y, if t.style == Style::ColorOs { 1.0 } else { bar });
             if pressing == Some(action) {
                 widgets::button_held(out, t, glyph);
             } else {
