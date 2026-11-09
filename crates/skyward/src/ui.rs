@@ -1935,6 +1935,13 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                 Incoming::Input(Event::Key(k, true)) => app.key(k, now),
                 Incoming::Input(Event::Key(k, false)) => app.key_up(k, now),
             };
+            // A tap that worked a control ticks the motor, as the system
+            // gives; the pages say so rather than handing back an effect.
+            if app.tap_worked {
+                if let Some(h) = &mut haptics {
+                    h.click(app.state.vibration)?;
+                }
+            }
             // What the pages ask for in answer to the work done goes on
             // after it.
             let mut queue = VecDeque::from(effects);

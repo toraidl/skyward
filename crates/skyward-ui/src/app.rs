@@ -2372,6 +2372,8 @@ fn keyboard_strip(t: &Theme, frame: &Frame) -> (Canvas, i32) {
 
 pub struct App {
     pub state: State,
+    /// The last touch worked a control, so the runtime ticks the motor.
+    pub tap_worked: bool,
     /// The pages open, the one shown last: each with how far it is
     /// scrolled and where the keys are on it.
     stack: Vec<(Screen, f32, Focus)>,
@@ -2509,6 +2511,7 @@ impl App {
     pub fn new(start: Screen, w: u32, h: u32, px_per_dp: f32) -> Self {
         App {
             state: State::default(),
+            tap_worked: false,
             stack: vec![(start, 0.0, Focus::Unset)],
             frame: None,
             spots: None,
@@ -5452,6 +5455,7 @@ impl App {
     }
 
     pub fn touch(&mut self, ev: Touch, f: &Fonts, now: u64) -> Vec<Effect> {
+        self.tap_worked = false;
         if !self.display_on {
             // A finger on the dark panel lights it, and does nothing else
             // until it lifts.
@@ -5649,6 +5653,12 @@ impl App {
                     if let Some(p) = &mut self.row_press {
                         p.lift(now);
                     }
+                    // A tap that works a control ticks the motor, as the
+                    // system does; a tap on nothing, a scroll and a hold
+                    // that has already ticked do not. The runtime plays it
+                    // rather than a returned effect, so that what a
+                    // control does stays what the pages hand back.
+                    self.tap_worked = self.state.vibrate;
                     fx.extend(self.act(a, now));
                 }
                 Drag::Press { x, y, action: None, .. } if self.screen() == Screen::Editor => self.place_caret(f, x, y + scroll),
@@ -7219,6 +7229,24 @@ mod tests {
         app.touch(Touch::Down(x, y), &f, 1000);
         app.touch(Touch::Move(x, y + t.m.dp(30.0)), &f, 1050);
         assert!(app.row_press.is_none());
+    }
+
+    #[test]
+    fn a_tap_that_works_a_control_ticks_the_motor() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        tap(&mut app, &f, &i, Action::Open(Screen::Backup));
+        assert!(app.tap_worked, "a tap on a row ticks the motor");
+
+        let mut still = App::new(Screen::Home, W, H, PPD);
+        still.state.vibrate = false;
+        tap(&mut still, &f, &i, Action::Open(Screen::Backup));
+        assert!(!still.tap_worked, "vibration off leaves the phone still");
+
+        let mut nothing = App::new(Screen::Home, W, H, PPD);
+        nothing.touch(Touch::Down(1.0, 1.0), &f, 0);
+        nothing.touch(Touch::Up, &f, 0);
+        assert!(!nothing.tap_worked, "a tap on nothing stays still");
     }
 
     #[test]
