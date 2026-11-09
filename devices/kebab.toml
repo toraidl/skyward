@@ -218,3 +218,12 @@ capabilities = ["NET_ADMIN"]
 version = "14.0.0.602"
 package = "/home/bruce/coloros_port/KB2000_14.0.0.602.zip"
 recovery = "6286ad199599cf15fc4a9634d213432985167ed05dd2cf59e2c57e8a20f59072"
+
+# The PM8150B haptics driver keeps six waveforms in the device tree, wf_0 to
+# wf_5, each 53 ms of the linear motor: the first is the short click the
+# stock system plays. /dev/input/event3 takes the effect; the driver reads
+# the waveform's number from the first of three values and writes the
+# length it plays into the other two.
+[haptics]
+click = 0
+strength = { lightest = 0.25, strongest = 0.75 }
