@@ -77,6 +77,16 @@ impl Haptics {
             Some(dir) => {
                 let dir = PathBuf::from(dir);
                 ensure!(dir.join("activate").is_file(), "{} holds no LED-class vibrator", dir.display());
+                // The AW8697's driver probes before the odm partition is
+                // mounted, so it cannot read the RAM image the motor plays
+                // from and refuses every click until asked again. Ask now
+                // that the partition is there; the driver names the image
+                // by the motor's own measured resonant frequency.
+                let update = dir.join("ram_update");
+                if update.is_file() {
+                    fs::write(&update, "1").with_context(|| format!("write {}", update.display()))?;
+                    std::thread::sleep(Duration::from_millis(250));
+                }
                 eprintln!("haptics {}: clicks as a timed buzz", dir.display());
                 Motor::Led { dir }
             }
