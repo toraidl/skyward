@@ -819,6 +819,10 @@ pub enum Confirm {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Wipe {
     All,
+    /// Everything in the data partition but the folder OnePlus keeps an
+    /// update's image in, erased where it lies so that the image, and the
+    /// key that makes it readable, stay.
+    AllKeepingReserve,
     /// Each app's own data, for every user.
     AppData,
     /// The files users share between apps.
@@ -836,8 +840,18 @@ pub enum Wipe {
 }
 
 /// What the wipe page offers, in the order it lists them.
-pub const WIPES: [Wipe; 9] =
-    [Wipe::All, Wipe::AppData, Wipe::Media, Wipe::AppCaches, Wipe::SystemCaches, Wipe::Art, Wipe::Logs, Wipe::Updates, Wipe::Cache];
+pub const WIPES: [Wipe; 10] = [
+    Wipe::All,
+    Wipe::AllKeepingReserve,
+    Wipe::AppData,
+    Wipe::Media,
+    Wipe::AppCaches,
+    Wipe::SystemCaches,
+    Wipe::Art,
+    Wipe::Logs,
+    Wipe::Updates,
+    Wipe::Cache,
+];
 
 /// A part of the phone that erasing goes through, in the order it does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1483,6 +1497,9 @@ pub struct State {
     pub wipe: [bool; WIPES.len()],
     /// The phone has a cache partition, which the wipe page then offers.
     pub cache_partition: bool,
+    /// The data partition holds OnePlus's reserve folder, which one wipe
+    /// keeps; the page offers that wipe only where it does.
+    pub reserve: bool,
     /// How many folders of its own the phone keeps logs in on the data
     /// partition, which erasing the logs takes in.
     pub phone_logs: usize,
@@ -1632,6 +1649,7 @@ impl Default for State {
             reboot: 0,
             wipe: [false; WIPES.len()],
             cache_partition: false,
+            reserve: false,
             phone_logs: 0,
             pattern: Vec::new(),
             confirm: 0.0,

@@ -14,7 +14,9 @@ use std::path::Path;
 /// Where the phone keeps the reserve partition as a file, and the folder
 /// around it.
 const IMAGE: &str = "/data/reserve/reserve.img";
-const FOLDER: &str = "/data/reserve";
+/// The folder the reserve image is kept in, which a wipe that keeps it
+/// leaves untouched.
+pub const FOLDER: &str = "/data/reserve";
 
 /// The names the update engine looks the file up by.
 const BY_NAME: &str = "/dev/block/by-name";

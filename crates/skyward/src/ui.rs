@@ -700,6 +700,7 @@ fn step(choice: Wipe) -> Step {
         Wipe::Logs => Step::Logs,
         Wipe::Updates => Step::Updates,
         Wipe::All => unreachable!("everything is a factory reset, not a part of one"),
+        Wipe::AllKeepingReserve => unreachable!("everything but the reserve folder is a wipe of its own, not a part of one"),
     }
 }
 
@@ -741,6 +742,18 @@ fn rescue_wipe(app: &mut App) -> Result<Eraser> {
         Ok(plan) => Eraser::start(move |tell| plan.carry_out(false, tell)),
         Err(stop) => Eraser::stopped(stop),
     }
+}
+
+/// Start erasing everything in the data partition but OnePlus's reserve
+/// folder, its page following it: the partition and its key are left as
+/// they are, so the update the folder carries still lands at the next
+/// start.
+fn clear_keeping_reserve(app: &mut App) -> Result<Eraser> {
+    app.erase_started(false, false, vec![Part::Data]);
+    Eraser::start(move |tell| {
+        tell(wipe::Event::At(Step::Data));
+        wipe::clear_data_but(skyward_install::reserve::FOLDER, tell)
+    })
 }
 
 /// Start erasing parts on their own, its page following it: parts of the
@@ -1985,6 +1998,8 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         erase_leaves = false;
                         if chosen.contains(&Wipe::All) {
                             eraser = Some(factory_reset(&mut app, false, false, None)?);
+                        } else if chosen.contains(&Wipe::AllKeepingReserve) {
+                            eraser = Some(clear_keeping_reserve(&mut app)?);
                         } else if chosen.iter().any(|&w| w != Wipe::Cache) && app.state.data == Data::Erased {
                             app.erase_started(false, false, Vec::new());
                             app.erase_ended(Err(EraseStop::Erased), now);
@@ -2397,6 +2412,11 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
         // Internal storage goes to the computer while it is open, and no
         // erasing or installing could take it away. File transfer that does
         // not follow, or whose service ended, stops, and the page says why.
+        // The wipe that keeps OnePlus's reserve folder is offered only where
+        // the data partition holds one.
+        if !app.state.reserve && app.state.data.storage_open() {
+            app.state.reserve = Path::new(skyward_install::reserve::FOLDER).is_dir();
+        }
         let kept = match &mut transfer {
             Some(t) if !t.service.running() => Err(anyhow!("the file transfer service ended")),
             Some(t) => {

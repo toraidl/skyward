@@ -270,6 +270,38 @@ pub fn parts(steps: Vec<Step>, logs: &[String], reformat: Option<String>) -> Res
     Ok(Parts { steps, cache, logs: logs.iter().map(PathBuf::from).collect(), reformat })
 }
 
+/// Erase everything the data partition holds but the folder `reserve`,
+/// where it lies: the partition and the key it was opened with stay, so an
+/// update's image in that folder keeps working. A factory reset discards
+/// the partition whole, which takes the image with it; this is the wipe for
+/// a phone that keeps one.
+pub fn clear_data_but(reserve: &str, tell: &mut dyn FnMut(Event)) -> Result<(), Stop> {
+    if !mount::is_mount_point(Path::new(DATA)).map_err(|e| Stop::Closed(format!("{e:#}")))? {
+        crate::decrypt::with_key_service(data::open_without_credential).map_err(Stop::Closed)?;
+    }
+    let keep = reserve.trim_start_matches('/');
+    let mut folders = Vec::new();
+    let mut files = Vec::new();
+    let gone = |e: std::io::Error| Stop::Failed(Step::Data, anyhow::Error::from(e));
+    let entries = fs::read_dir(DATA).map_err(gone)?;
+    for entry in entries {
+        let entry = entry.map_err(gone)?;
+        if entry.file_name().to_string_lossy() == keep {
+            continue;
+        }
+        let path = entry.path();
+        match entry.file_type().map_err(gone)?.is_dir() {
+            true => folders.push(path),
+            false => files.push(path),
+        }
+    }
+    clear_files(&folders, tell).map_err(|e| Stop::Failed(Step::Data, e))?;
+    for file in files {
+        fs::remove_file(&file).with_context(|| format!("delete {}", file.display())).map_err(|e| Stop::Failed(Step::Data, e))?;
+    }
+    Ok(())
+}
+
 impl Parts {
     /// The parts, in the order they are erased.
     pub fn steps(&self) -> Vec<Step> {

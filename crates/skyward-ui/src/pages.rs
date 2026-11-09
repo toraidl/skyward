@@ -1501,6 +1501,15 @@ fn wipe_row(w: Wipe, s: &State) -> (&'static str, String) {
     let l = s.lang;
     let (title, what): (Text, String) = match w {
         Wipe::All => (["全部数据", "全部資料", "All data"], capitalized(l, &factory_reset(s))),
+        Wipe::AllKeepingReserve => (
+            ["全部数据，保留 reserve", "全部資料，保留 reserve", "All data, keeping reserve"],
+            l.pick([
+                "清除 /data 下的全部内容，但保留 /data/reserve（一加 A/B 机型的更新镜像）。数据分区和它的密钥不动，reserve 里的更新仍可在下次开机时交接",
+                "清除 /data 下的全部內容，但保留 /data/reserve（一加 A/B 機型的更新映像）。資料分割區和它的金鑰不動，reserve 裡的更新仍可在下次開機時交接",
+                "Erases everything in /data but /data/reserve, the folder a OnePlus A/B phone keeps an update's image in. The partition and its key stay, so that update can still be promoted at the next start",
+            ])
+            .into(),
+        ),
         Wipe::AppData => (
             ["应用数据", "應用程式資料", "App data"],
             l.pick([
@@ -1577,9 +1586,18 @@ pub fn wipe(cx: &Ctx) -> Frame {
     let mut out = Vec::new();
     let top = t.m.content_top;
     let y = widgets::section_first(&mut c, t, f, top, l.pick(["恢复出厂设置", "恢復原廠設定", "Factory reset"]));
-    let (name, sub) = wipe_row(Wipe::All, s);
-    let all = widgets::list(&mut c, t, f, y, &[Row::new(name).subtitle(&sub).trail(Trail::Check(chosen(Wipe::All)))]);
-    out.extend(hits(&all.rows, &[Action::WipeItem(Wipe::All)]));
+    let mut offered = vec![(Wipe::All, wipe_row(Wipe::All, s))];
+    if s.reserve {
+        offered.push((Wipe::AllKeepingReserve, wipe_row(Wipe::AllKeepingReserve, s)));
+    }
+    let mut factory = Vec::new();
+    let mut factory_picks = Vec::new();
+    for &(w, (name, ref sub)) in &offered {
+        factory.push(Row::new(name).subtitle(sub).trail(Trail::Check(chosen(w))));
+        factory_picks.push(Action::WipeItem(w));
+    }
+    let all = widgets::list(&mut c, t, f, y, &factory);
+    out.extend(hits(&all.rows, &factory_picks));
     let note = l.pick([
         "系统和已安装的更新不受影响，清除后需重新设置手机。",
         "系統和已安裝的更新不受影響，清除後需重新設定手機。",

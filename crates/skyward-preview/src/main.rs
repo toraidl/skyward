@@ -386,7 +386,8 @@ fn main() -> Result<()> {
     let adding = |app: &mut App, name: &str, security: Security, field: Field, choosing: bool| {
         app.state.adding = Some(Adding { name: name.into(), security, field, choosing });
     };
-    let pages: [PageShot; 160] = [
+    let pages: [PageShot; 161] = [
+        ("07b-wipe-light-reserve", Screen::Wipe, false, &|app| app.state.reserve = true),
         ("11-install-light-locked", Screen::Install, false, &|app| {
             app.state.data = Data::Locked { user: 0, keys: Keys::Digits, checking: false };
         }),
@@ -895,7 +896,7 @@ fn main() -> Result<()> {
         ("92-wipe-dark-parts-cache", Screen::Wipe, true, &|app| {
             app.state.cache_partition = true;
             app.state.phone_logs = 7;
-            app.state.wipe = [false, false, true, true, true, false, true, false, true];
+            app.state.wipe = [false, false, false, true, true, true, false, true, false, true];
         }),
         ("93-erase-light-media", Screen::Erase, false, &|app| {
             app.erase_started(false, false, vec![Part::Media, Part::AppCaches, Part::SystemCaches, Part::Logs]);
