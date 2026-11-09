@@ -6019,7 +6019,9 @@ impl App {
             },
             Confirm::FactoryReset => fx.push(Effect::FactoryReset),
             Confirm::Merge => {
-                if self.state.update == Standing::Waiting {
+                // A merge that stopped carries on from where it did, the
+                // same as one that has not started yet does.
+                if matches!(self.state.update, Standing::Waiting | Standing::Failed(_)) {
                     self.state.update = Standing::Merging(0.0);
                     self.refresh();
                     fx.push(Effect::Merge);
@@ -7406,6 +7408,19 @@ mod tests {
         app.set_update(Standing::Installed(Slot::A));
         tap(&mut app, &f, &i, Action::Open(Screen::Update));
         assert!(app.frame(&f, &i).hits.is_empty(), "an update in the other slot merges once that slot has started");
+    }
+
+    #[test]
+    fn a_merge_that_stopped_is_carried_on_from_the_update_page() {
+        let (f, i) = (fonts(), info());
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
+        app.set_update(Standing::Failed(skyward_vab::FailureCode::WrongMergeCountConsistencyCheck));
+        tap(&mut app, &f, &i, Action::Open(Screen::Update));
+        assert_eq!(app.screen(), Screen::Update);
+        assert_eq!(crate::pages::confirm_label(Confirm::Merge, &app.state), ("滑动以继续合并", true), "the track carries the merge on");
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Merge), vec![Effect::Merge]);
+        assert_eq!(app.state.update, Standing::Merging(0.0), "the page turns to the merge at once");
+        assert!(app.frame(&f, &i).hits.is_empty(), "nothing to swipe while it merges");
     }
 
     #[test]

@@ -128,7 +128,13 @@ pub fn confirm_label(which: Confirm, s: &State) -> (&'static str, bool) {
         Confirm::Install => (INSTALL, false),
         Confirm::InstallWipe => (["滑动以安装并清除", "滑動以安裝並清除", "Slide to install and wipe"], true),
         Confirm::RunScript => (INSTALL, true),
-        Confirm::Merge => (["滑动以合并", "滑動以合併", "Slide to merge"], true),
+        // A merge that stopped goes on where it did when its snapshots are
+        // mapped again, so the track asks to carry it on rather than to
+        // begin one.
+        Confirm::Merge => match s.update {
+            Standing::Failed(_) => (["滑动以继续合并", "滑動以繼續合併", "Slide to resume merging"], true),
+            _ => (["滑动以合并", "滑動以合併", "Slide to merge"], true),
+        },
         Confirm::Relabel => (["滑动以修复", "滑動以修復", "Slide to fix"], true),
     };
     (s.lang.pick(label), danger)
@@ -2494,11 +2500,23 @@ pub fn update(cx: &Ctx) -> Frame {
     let merging = l.pick(["更新合并", "更新合併", "Merging"]);
     y = if y == top { widgets::section_first(&mut c, t, f, y, merging) } else { widgets::section(&mut c, t, f, y, merging) };
     y = widgets::list(&mut c, t, f, y, &[row]).bottom;
-    if s.update == Standing::Waiting {
+    // An update waiting to merge starts here; one whose merge stopped
+    // carries on from where it did, as it does when the snapshots are
+    // mapped again.
+    let failed = matches!(s.update, Standing::Failed(_));
+    if s.update == Standing::Waiting || failed {
         let (label, danger) = confirm_label(Confirm::Merge, cx.state);
         let track = widgets::confirm(&mut c, t, f, y + t.m.dp(28.0), label, danger, s.confirm);
         out.push(Hit { rect: track, action: Action::Confirm(Confirm::Merge) });
-        let note = l.pick(["合并后无法回到更新前的系统。", "合併後無法回到更新前的系統。", "Once merged, the system from before the update can't come back."]);
+        let note = if failed {
+            l.pick([
+                "从上次停下的地方继续合并，原因还在的话会再次失败。",
+                "從上次停下的地方繼續合併，原因還在的話會再次失敗。",
+                "Goes on from where it stopped; it fails again if the cause is still there.",
+            ])
+        } else {
+            l.pick(["合并后无法回到更新前的系统。", "合併後無法回到更新前的系統。", "Once merged, the system from before the update can't come back."])
+        };
         y = widgets::footnote(&mut c, t, f, track.y + track.h, note);
     }
     Frame::new(t, fit(c, t, y), out, l.pick(UPDATE), top)

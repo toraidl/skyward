@@ -415,7 +415,12 @@ pub fn update(l: Lang, s: &Standing, next: Option<Slot>) -> (&'static str, Optio
         Standing::Merging(_) => (l.pick(["正在合并更新", "正在合併更新", "Merging the update"]), None),
         Standing::Failed(code) => (
             l.pick(["更新合并失败", "更新合併失敗", "The update failed to merge"]),
-            Some(tr!(l, "重启后将继续合并（{code:?}）", "重新啟動後將繼續合併（{code:?}）", "Merging goes on after a reboot ({code:?})")),
+            Some(tr!(
+                l,
+                "重启或在此继续合并（{code:?}）",
+                "重新啟動或在此繼續合併（{code:?}）",
+                "Goes on after a reboot, or from here ({code:?})"
+            )),
         ),
         Standing::Merged => (
             l.pick(["更新已合并", "更新已合併", "Update merged"]),
