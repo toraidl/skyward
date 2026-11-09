@@ -856,8 +856,18 @@ pub const ABOUT_BAR_MASK: [(f32, f32); 5] = [(0.0, 1.0), (0.52, 0.98), (0.74, 0.
 /// the status bar and title, thinning out by 20 dp below them, with an
 /// ordered dither against banding. `level` brings it in and out.
 pub fn bar_mask(c: &mut Canvas, t: &Theme, stops: &[(f32, f32)], color: Rgba, level: f32) {
+    if t.style == Style::ColorOs {
+        // The stock header is opaque behind the status bar and the title,
+        // and the page thins out only just under it.
+        mask(c, bar_bottom(t) + t.m.dp(16.0), &COLOROS_BAR_MASK, color, level, 0..0);
+        return;
+    }
     mask(c, bar_bottom(t) + t.m.dp(20.0), stops, color, level, 0..0);
 }
+
+/// The mask's strength down a ColorOS header: solid behind the status bar
+/// and the title, gone just under them.
+const COLOROS_BAR_MASK: [(f32, f32); 5] = [(0.0, 1.0), (0.78, 1.0), (0.88, 0.86), (0.95, 0.42), (1.0, 0.0)];
 
 /// How far below a pinned strip the list thins out from under the mask, as
 /// the stock file manager's does.
@@ -871,9 +881,10 @@ pub fn strip_mask(c: &mut Canvas, t: &Theme, color: Rgba, level: f32, top: f32, 
     let h = bottom + t.m.dp(STRIP_FADE_DP);
     let s = bottom / h;
     // The bar mask from where it starts to thin, stretched over the fade.
-    let (solid, _) = BAR_MASK.iter().rev().find(|&&(_, a)| a == BAR_MASK[0].1).expect("the bar mask starts solid");
-    let mut stops = vec![(0.0, BAR_MASK[0].1)];
-    stops.extend(BAR_MASK.iter().filter(|&&(p, _)| p >= *solid).map(|&(p, a)| (s + (p - solid) / (1.0 - solid) * (1.0 - s), a)));
+    let base: &[(f32, f32)] = if t.style == Style::ColorOs { &COLOROS_BAR_MASK } else { &BAR_MASK };
+    let (solid, _) = base.iter().rev().find(|&&(_, a)| a == base[0].1).expect("the bar mask starts solid");
+    let mut stops = vec![(0.0, base[0].1)];
+    stops.extend(base.iter().filter(|&&(p, _)| p >= *solid).map(|&(p, a)| (s + (p - solid) / (1.0 - solid) * (1.0 - s), a)));
     mask(c, h, &stops, color, level, top.max(0.0) as u32..bottom.max(0.0) as u32);
 }
 
@@ -2304,6 +2315,66 @@ pub fn wordmark(t: &Theme, f: &Fonts, text: &str, cap_top: f32, px: f32) -> Spri
     })
 }
 
+/// The About page's hero under ColorOS: one rounded card filled with the
+/// stock wallpaper's indigo-to-violet light, the wordmark and the version
+/// standing in it and the update's state near its foot. Returns the card's
+/// bottom.
+pub fn hero_card(
+    c: &mut Canvas,
+    t: &Theme,
+    f: &Fonts,
+    top: f32,
+    height: f32,
+    wordmark: &str,
+    version: &str,
+    author: &str,
+    note: &str,
+) -> f32 {
+    let m = &t.m;
+    let (x, w) = (m.margin, m.w as f32 - m.margin * 2.0);
+    let (cw, ch) = (w.ceil() as u32, height.ceil() as u32);
+    let mut card = Canvas::new(cw, ch);
+    // Deep indigo overhead, violet through the middle, a warm glow at the
+    // foot, as the stock wallpaper runs.
+    let (head, middle, foot) = (Rgba::rgb(33, 35, 74), Rgba::rgb(108, 88, 188), Rgba::rgb(196, 116, 112));
+    let (cw_f, ch_f) = (cw.max(1) as f32, ch.max(1) as f32);
+    card.shade_rows(0, ch, |x, y| {
+        let (fx, fy) = (x / cw_f, y / ch_f);
+        let base = if fy < 0.62 {
+            mix(head, middle, fy / 0.62)
+        } else {
+            mix(middle, foot, (fy - 0.62) / 0.38 * 0.6)
+        };
+        // The stock card carries two soft lights: a violet one high on the
+        // right and a warm one low on the left.
+        let violet = {
+            let (dx, dy) = (fx - 0.82, fy - 0.16);
+            (1.0 - (dx * dx + dy * dy).sqrt() / 0.62).clamp(0.0, 1.0).powi(2) * 0.45
+        };
+        let warm = {
+            let (dx, dy) = ((fx - 0.14) * 0.9, fy - 1.02);
+            (1.0 - (dx * dx + dy * dy).sqrt() / 0.66).clamp(0.0, 1.0).powi(2) * 0.6
+        };
+        mix(mix(base, Rgba::rgb(132, 108, 226), violet), Rgba::rgb(244, 128, 58), warm)
+    });
+    // Round the card's corners by laying its own shape over the field: the
+    // gradient is made as a rectangle first, then masked.
+    let mut mask = Canvas::new(cw, ch);
+    mask.fill_round_rect(0.0, 0.0, w, height, m.card_radius, Rgba::rgb(255, 255, 255));
+    for i in 0..(cw * ch) as usize {
+        card.data[i * 4 + 3] = ((card.data[i * 4 + 3] as u32 * mask.data[i * 4 + 3] as u32) / 255) as u8;
+    }
+    c.lay(&card, x as i32, top as i32, 1.0);
+
+    let white = Rgba::rgb(255, 255, 255);
+    let cx = m.w as f32 / 2.0;
+    c.text_center(&f.display, wordmark, cx, top + height * 0.40, m.dp(46.0), white);
+    c.text_center(&f.body, version, cx, top + height * 0.53, m.dp(15.0), white.with_alpha(214));
+    c.text_center(&f.body, author, cx, top + height * 0.60, m.dp(12.5), white.with_alpha(160));
+    c.text_center(&f.heading, note, cx, top + height - m.dp(32.0), m.dp(15.0), white.with_alpha(228));
+    top + height
+}
+
 /// The version line centred under the About wordmark.
 pub fn version_line(t: &Theme, f: &Fonts, text: &str) -> Sprite {
     hero_line(t, f, text, 0.0)
@@ -2341,7 +2412,8 @@ pub struct Fact<'a> {
 /// The About summary card: rows a little shorter than settings rows.
 pub fn facts(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, rows: &[Fact], tone: &Tone) -> Block {
     let m = &t.m;
-    let row_h = m.dp(51.0);
+    let coloros = t.style == Style::ColorOs;
+    let row_h = if coloros { m.row_h } else { m.dp(51.0) };
     let (card_x, right) = (m.margin, m.w as f32 - m.margin);
     let h = row_h * rows.len() as f32;
     c.fill_round_rect(card_x, top, right - card_x, h, m.card_radius, tone.card);
@@ -2349,6 +2421,11 @@ pub fn facts(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, rows: &[Fact], tone
     for (i, r) in rows.iter().enumerate() {
         rects.push(Rect::new(card_x, top + row_h * i as f32, right - card_x, row_h));
         let cy = top + row_h * (i as f32 + 0.5);
+        if coloros && i + 1 < rows.len() {
+            let hair = m.dp(0.34).max(1.0);
+            let y = top + row_h * (i + 1) as f32;
+            c.fill_rect(card_x + m.inner, y - hair / 2.0, right - card_x - m.inner * 2.0, hair, t.pal.divider);
+        }
         let tx = card_x + m.inner;
         let tw = c.text_vc(&f.heading, r.title, tx, cy, m.row_title_px, tone.text, None);
         let value_right = if r.link {
@@ -2371,6 +2448,35 @@ pub fn spec_card(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, title: &str, it
     let (card_x, right) = (m.margin, m.w as f32 - m.margin);
     let x = card_x + m.inner;
     let room = right - m.inner - x;
+    if t.style == Style::ColorOs {
+        // ColorOS sets the model over the values, each value under its own
+        // grey caption, with a hairline between one entry and the next.
+        let title_px = m.dp(24.0);
+        let lines: Vec<String> = title.split('\n').flat_map(|l| wrap(c, &f.heading, l, title_px, room)).collect();
+        let first_title = top + m.dp(22.0) + f.heading.cap(title_px);
+        let title_pitch = m.dp(32.0);
+        let last_title = first_title + title_pitch * lines.len().saturating_sub(1) as f32;
+        let rule = last_title + m.dp(20.0);
+        let item_top = rule + m.dp(18.0);
+        let (caption_px, value_px) = (m.dp(13.0), m.dp(17.0));
+        let block = m.dp(58.0);
+        let bottom = item_top + block * items.len() as f32 + m.dp(6.0);
+        c.fill_round_rect(card_x, top, right - card_x, bottom - top, m.card_radius, tone.card);
+        for (k, line) in lines.iter().enumerate() {
+            c.text(&f.heading, line, x, first_title + title_pitch * k as f32, title_px, tone.text, Some(room));
+        }
+        let hair = m.dp(0.34).max(1.0);
+        c.fill_rect(x, rule - hair / 2.0, right - m.inner - x, hair, t.pal.divider);
+        for (i, (caption, value)) in items.iter().enumerate() {
+            let at = item_top + block * i as f32;
+            c.text_top(&f.body, caption, x, at + m.dp(10.0), caption_px, tone.caption, None);
+            c.text_top(&f.heading, value, x, at + m.dp(28.0), value_px, tone.text, Some(room));
+            if i + 1 < items.len() {
+                c.fill_rect(x, at + block - hair / 2.0, right - m.inner - x, hair, t.pal.divider);
+            }
+        }
+        return bottom;
+    }
     let title_px = m.dp(24.0);
     let lines: Vec<String> = title.split('\n').flat_map(|l| wrap(c, &f.heading, l, title_px, room)).collect();
     let first_title = top + m.dp(23.0) + f.heading.cap(title_px);
@@ -2403,6 +2509,36 @@ pub struct Spec<'a> {
 pub fn spec_grid(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, items: &[Spec]) -> f32 {
     let m = &t.m;
     let (card_x, right) = (m.margin, m.w as f32 - m.margin);
+    if t.style == Style::ColorOs {
+        // ColorOS lists one entry under another, each value under its grey
+        // caption, the entries parted by hairlines; it draws no icons here.
+        let x = card_x + m.inner;
+        let width = right - m.inner - x;
+        let (caption_px, value_px) = (m.dp(13.0), m.dp(17.0));
+        let cells: Vec<Vec<String>> =
+            items.iter().map(|s| s.value.split('\n').flat_map(|l| wrap(c, &f.heading, l, value_px, width)).collect()).collect();
+        let (head, gap, foot, value_pitch) = (m.dp(10.0), m.dp(6.0), m.dp(12.0), value_px * 1.4);
+        let heights: Vec<f32> =
+            cells.iter().map(|lines| head + caption_px * 1.3 + gap + value_pitch * lines.len() as f32 + foot).collect();
+        let total: f32 = heights.iter().sum();
+        let bottom = top + total;
+        c.fill_round_rect(card_x, top, right - card_x, total, m.card_radius, t.pal.card);
+        let hair = m.dp(0.34).max(1.0);
+        let mut y = top;
+        for (i, (s, lines)) in items.iter().zip(&cells).enumerate() {
+            c.text_top(&f.body, s.label, x, y + head, caption_px, t.pal.subtitle, None);
+            let mut at = y + head + caption_px * 1.3 + gap;
+            for l in lines {
+                c.text_top(&f.heading, l, x, at, value_px, t.pal.info, None);
+                at += value_pitch;
+            }
+            y += heights[i];
+            if i + 1 < items.len() {
+                c.fill_rect(x, y - hair / 2.0, width, hair, t.pal.divider);
+            }
+        }
+        return bottom;
+    }
     let cols = [card_x + m.inner, card_x + (right - card_x) * 0.507];
     let widths = [cols[1] - cols[0] - m.inner, right - m.inner - cols[1]];
     let (value_px, pitch) = (m.dp(16.0), m.dp(21.5));
@@ -2447,16 +2583,24 @@ pub fn info_card(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, items: &[(&str,
     let blocks: Vec<Vec<String>> =
         items.iter().map(|(_, v)| v.lines().flat_map(|l| wrap(c, &f.body, l, m.sub_px, width)).collect()).collect();
     let mut bases = Vec::new();
+    let mut rules = Vec::new();
     let mut title_top = top + m.dp(23.5);
     let mut last = title_top;
-    for lines in &blocks {
+    for (k, lines) in blocks.iter().enumerate() {
         let base = title_top - ink_top;
         bases.push(base);
         last = base + to_value + pitch * lines.len().saturating_sub(1) as f32;
+        if t.style == Style::ColorOs && k + 1 < blocks.len() {
+            rules.push(last + m.dp(16.5));
+        }
         title_top = last + m.dp(33.0);
     }
     let bottom = last + m.dp(24.0);
     c.fill_round_rect(card_x, top, right - card_x, bottom - top, m.card_radius, t.pal.card);
+    let hair = m.dp(0.34).max(1.0);
+    for y in rules {
+        c.fill_rect(x, y - hair / 2.0, width, hair, t.pal.divider);
+    }
     for ((title, _), (lines, base)) in items.iter().zip(blocks.iter().zip(&bases)) {
         c.text(&f.heading, title, x, *base, m.row_title_px, t.pal.info, Some(width));
         for (k, l) in lines.iter().enumerate() {

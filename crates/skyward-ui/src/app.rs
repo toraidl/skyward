@@ -1640,7 +1640,7 @@ impl Default for State {
     fn default() -> Self {
         State {
             lang: Lang::Hans,
-            style: Style::HyperOs,
+            style: Style::ColorOs,
             dark: false,
             brightness: SLIDER_START,
             // Two minutes.
@@ -6537,6 +6537,32 @@ mod tests {
         crate::font::bundled()
     }
 
+    /// The app as the older assertions measure it: HyperOS's geometry,
+    /// which those numbers were fitted to, whatever the shipping theme is.
+    /// The ColorOS geometry is covered by the `widgets` tests and by the
+    /// screens `--style coloros` renders.
+    fn hyperos_app(start: Screen, w: u32, h: u32, ppd: f32) -> App {
+        let mut app = App::new(start, w, h, ppd);
+        app.state.style = Style::HyperOs;
+        app
+    }
+
+    #[test]
+    fn the_app_draws_in_coloros_unless_told_otherwise() {
+        let (f, i) = (fonts(), info());
+        let mut app = App::new(Screen::Home, W, H, PPD);
+        let t = app.theme();
+        assert_eq!((app.state.style, t.style), (Style::ColorOs, Style::ColorOs));
+        assert_eq!((t.pal.bg.r, t.pal.bg.g, t.pal.bg.b), (240, 241, 242), "the stock page grey");
+        assert!((t.m.card_radius - t.m.dp(28.0)).abs() < 0.01, "the stock corners");
+        let mut c = Canvas::new(W, H);
+        app.compose(&mut c, &f, &i, "12:00", 0);
+        // The home page's white search bar under the header, on the grey page.
+        let bar = t.m.content_top + t.m.search_h / 2.0;
+        assert_eq!(grey_at(&c, t.m.w as f32 / 2.0, bar), 255, "a white search bar");
+        assert_eq!(grey_at(&c, 2.0, t.m.h as f32 / 2.0), 240, "on the grey page");
+    }
+
     fn info() -> DeviceInfo {
         DeviceInfo {
             model: "Xiaomi 13 Ultra".into(),
@@ -6632,7 +6658,7 @@ mod tests {
     #[test]
     fn a_page_at_rest_draws_the_rows_below_the_screen_a_band_at_a_time() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         app.compose(&mut Canvas::new(W, H), &f, &i, "12:00", 0);
         assert_eq!(app.frame.as_ref().unwrap().canvas.held(), 0..H, "the page shown has the rows on screen drawn");
         let mut bands = 1;
@@ -6649,7 +6675,7 @@ mod tests {
     #[test]
     fn a_page_typed_on_draws_again_only_what_changed_and_shows_what_it_would_drawn_anew() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Search, W, H, PPD);
+        let mut app = hyperos_app(Screen::Search, W, H, PPD);
         let mut out = Canvas::new(W, H);
         app.compose(&mut out, &f, &i, "12:00", 0);
         let anew = |app: &App| {
@@ -6732,7 +6758,7 @@ mod tests {
     #[test]
     fn rows_open_pages_and_back_returns() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         tap(&mut app, &f, &i, Action::Open(Screen::Settings));
         assert_eq!(app.screen(), Screen::Settings);
         tap_back(&mut app, &f, &i, 0);
@@ -6744,7 +6770,7 @@ mod tests {
     #[test]
     fn the_back_control_stays_put_while_the_page_scrolls() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         tap(&mut app, &f, &i, Action::Open(Screen::Settings));
         app.frame(&f, &i);
         app.touch(Touch::Down(700.0, 2400.0), &f, 0);
@@ -6759,7 +6785,7 @@ mod tests {
     /// `screen` opened from the home page, so there is a page to go back
     /// to.
     fn opened(screen: Screen, f: &Fonts, i: &DeviceInfo) -> App {
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         tap(&mut app, f, i, Action::Open(screen));
         app
     }
@@ -6767,7 +6793,7 @@ mod tests {
     #[test]
     fn home_opens_the_mount_page() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Mount)), vec![Effect::ReadMounts], "the page shows the partitions as they are now");
         assert_eq!(app.screen(), Screen::Mount);
     }
@@ -6783,7 +6809,7 @@ mod tests {
         // Where the first row under the card starts: the card is that much
         // taller with a notice in it.
         let under = |i: &DeviceInfo| {
-            let mut app = App::new(Screen::Home, W, H, PPD);
+            let mut app = hyperos_app(Screen::Home, W, H, PPD);
             app.frame(&f, i).hits.iter().find(|h| h.action == Action::Open(Screen::Install)).expect("an install row").rect.y
         };
         let plain = under(&info());
@@ -6799,7 +6825,7 @@ mod tests {
     fn the_home_card_tells_of_a_restart_into_the_other_slot_and_opens_the_slot_page() {
         let f = fonts();
         let i = DeviceInfo { slot: Some(Slot::B), ..info() };
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let slots = |active| BootSlots { next_known: true, active, bootable: [true, true], successful: [true, true] };
         app.set_boot_slots(Ok(slots(Slot::B)));
         assert!(app.frame(&f, &i).hits.iter().all(|h| h.action != Action::Open(Screen::Slot)), "the slot it runs from starts next");
@@ -6812,7 +6838,7 @@ mod tests {
     #[test]
     fn the_status_bar_carries_the_slot_the_data_partitions_lock_and_the_temperature() {
         let i = DeviceInfo { slot: Some(Slot::B), battery: Some(battery_at(64, Charge::Charging)), ..info() };
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let bar = app.bar("12:00", &i);
         assert_eq!((bar.slot, bar.temp, bar.battery), (Some("B"), Some(352), Some((64, Some(Bolt::Charging)))), "the temperature to the tenth");
         let quick = DeviceInfo { battery: Some(skyward_info::Battery { quick: true, ..battery_at(64, Charge::Charging) }), ..info() };
@@ -6837,12 +6863,12 @@ mod tests {
     fn a_home_page_grown_by_an_update_notice_scrolls_down_to_its_last_row() {
         let f = fonts();
         let plain = info();
-        let mut app = App::new(Screen::Home, W, SNUG, PPD);
+        let mut app = hyperos_app(Screen::Home, W, SNUG, PPD);
         let fr = app.frame(&f, &plain);
         let reboot = fr.hits.iter().find(|h| h.action == Action::Open(Screen::Reboot)).expect("a reboot row").rect;
         assert!(reboot.y + reboot.h <= SNUG as f32, "without the notice the rows fit the screen");
         let i = DeviceInfo { snapshot: SnapshotState::Snapshotted, ..info() };
-        let mut app = App::new(Screen::Home, W, SNUG, PPD);
+        let mut app = hyperos_app(Screen::Home, W, SNUG, PPD);
         let fr = app.frame(&f, &i);
         let reboot = fr.hits.iter().find(|h| h.action == Action::Open(Screen::Reboot)).expect("a reboot row").rect;
         assert!(reboot.y + reboot.h > SNUG as f32, "the notice pushes the last row below the screen");
@@ -6888,7 +6914,7 @@ mod tests {
         let (f, i) = (fonts(), info());
         let t = Theme::light(W, H, PPD);
         let m = t.m;
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let mut screen = Canvas::new(W, H);
         // The bar's top along a column through it, clear of the title and
         // the placeholder: the first row in the field's grey.
@@ -6937,7 +6963,7 @@ mod tests {
         let (f, i) = (fonts(), info());
         let t = Theme::light(W, SHORT, PPD);
         let m = t.m;
-        let mut app = App::new(Screen::Home, W, SHORT, PPD);
+        let mut app = hyperos_app(Screen::Home, W, SHORT, PPD);
         let fold = app.frame(&f, &i).fold.expect("the home page's search bar folds");
         assert!((fold.span - (m.search_h + m.after_search)).abs() < 1e-3, "the bar and the gap under it");
         let mut screen = Canvas::new(W, SHORT);
@@ -6981,7 +7007,7 @@ mod tests {
     #[test]
     fn a_home_page_let_go_with_its_search_bar_part_folded_folds_it_whole_or_not_at_all() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, SHORT, PPD);
+        let mut app = hyperos_app(Screen::Home, W, SHORT, PPD);
         let span = app.frame(&f, &i).fold.expect("the home page's search bar folds").span;
         let settle = |app: &mut App, from: u64| {
             for ms in (from..from + 2000).step_by(8) {
@@ -7040,7 +7066,7 @@ mod tests {
     #[test]
     fn a_search_bar_folded_away_answers_no_touch() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let fold = app.frame(&f, &i).fold.expect("the home page's search bar folds");
         scroll_to(&mut app, &f, fold.span, 0);
         app.tick(3000);
@@ -7056,7 +7082,7 @@ mod tests {
     #[test]
     fn the_keys_unfold_the_search_bar_to_light_it() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let span = app.frame(&f, &i).fold.expect("the home page's search bar folds").span;
         scroll_to(&mut app, &f, span, 0);
         app.tick(3000);
@@ -7125,7 +7151,7 @@ mod tests {
     #[test]
     fn a_page_opened_slides_in_over_the_page_it_opens_from_and_back_off_it() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let mut c = Canvas::new(W, H);
         app.compose(&mut c, &f, &i, "12:00", 0);
         let home = shot(&c);
@@ -7167,7 +7193,7 @@ mod tests {
     #[test]
     fn a_page_sliding_has_its_leading_corners_rounded_as_the_screens_are() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.set_screen_corners(140.0);
         let mut c = Canvas::new(W, H);
         app.compose(&mut c, &f, &i, "12:00", 0);
@@ -7189,7 +7215,7 @@ mod tests {
     #[test]
     fn a_finger_brings_a_sliding_page_to_rest_and_a_page_never_shown_gives_way_at_once() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let mut c = Canvas::new(W, H);
         app.compose(&mut c, &f, &i, "12:00", 0);
         tap_at(&mut app, &f, &i, Action::Open(Screen::Mount), 1000);
@@ -7210,7 +7236,7 @@ mod tests {
     fn a_row_held_darkens_behind_its_words_a_moment_after_the_finger_lands() {
         let (f, i) = (fonts(), info());
         let t = Theme::light(W, H, PPD);
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let mut c = Canvas::new(W, H);
         let row = app.frame(&f, &i).hits.iter().find(|h| h.action == Action::Open(Screen::Backup)).expect("on the home page").rect;
         // The card between the row's words and its arrow.
@@ -7247,7 +7273,7 @@ mod tests {
     fn a_row_scrolled_away_from_before_it_darkens_never_shows_held() {
         let (f, i) = (fonts(), info());
         let t = Theme::light(W, H, PPD);
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let row = app.frame(&f, &i).hits.iter().find(|h| h.action == Action::Open(Screen::Backup)).expect("on the home page").rect;
         let (x, y) = (W as f32 * 0.6, row.y + row.h / 2.0);
         app.touch(Touch::Down(x, y), &f, 1000);
@@ -7258,16 +7284,16 @@ mod tests {
     #[test]
     fn a_tap_that_works_a_control_ticks_the_motor() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         tap(&mut app, &f, &i, Action::Open(Screen::Backup));
         assert!(app.tap_worked, "a tap on a row ticks the motor");
 
-        let mut still = App::new(Screen::Home, W, H, PPD);
+        let mut still = hyperos_app(Screen::Home, W, H, PPD);
         still.state.vibrate = false;
         tap(&mut still, &f, &i, Action::Open(Screen::Backup));
         assert!(!still.tap_worked, "vibration off leaves the phone still");
 
-        let mut nothing = App::new(Screen::Home, W, H, PPD);
+        let mut nothing = hyperos_app(Screen::Home, W, H, PPD);
         nothing.touch(Touch::Down(1.0, 1.0), &f, 0);
         nothing.touch(Touch::Up, &f, 0);
         assert!(!nothing.tap_worked, "a tap on nothing stays still");
@@ -7277,7 +7303,7 @@ mod tests {
     fn a_row_tapped_quickly_shows_held_from_the_lift_and_fades_back() {
         let (f, i) = (fonts(), info());
         let t = Theme::light(W, H, PPD);
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         let mut c = Canvas::new(W, H);
         let row = app.frame(&f, &i).hits.iter().find(|h| h.action == Action::Toggle(Switch::Vibrate)).expect("on the settings page").rect;
         let (x, y) = (W as f32 * 0.6, row.y + row.h / 2.0);
@@ -7320,7 +7346,7 @@ mod tests {
         assert_eq!(app.screen(), Screen::Mount);
 
         // The search page's round button.
-        let mut app = App::new(Screen::Search, W, H, PPD);
+        let mut app = hyperos_app(Screen::Search, W, H, PPD);
         app.frame(&f, &i);
         let (_, button) = widgets::search_layout(&t);
         let (x, y) = button.centre();
@@ -7331,7 +7357,7 @@ mod tests {
         assert!(cross.abs_diff(70) <= 2, "the stock cross held down is 70, not {cross}");
 
         // The home page's search bar, clear of its words.
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let bar = app.frame(&f, &i).hits.iter().find(|h| h.action == Action::Open(Screen::Search)).expect("on the home page").rect;
         let (x, y) = (bar.x + bar.w * 0.8, bar.y + bar.h / 2.0);
         app.touch(Touch::Down(x, y), &f, 1000);
@@ -7364,7 +7390,7 @@ mod tests {
     #[test]
     fn an_update_waiting_in_the_slot_merges_with_a_swipe_and_shows_how_far_it_has_come() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
         app.set_update(Standing::Waiting);
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Update)), vec![Effect::ReadUpdate], "the page reads where the update stands");
         assert_eq!(app.screen(), Screen::Update);
@@ -7386,7 +7412,7 @@ mod tests {
     fn the_home_pages_word_on_a_waiting_update_opens_its_page() {
         let (f, mut i) = (fonts(), info());
         i.snapshot = SnapshotState::Snapshotted;
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Update)), vec![Effect::ReadUpdate]);
         assert_eq!(app.screen(), Screen::Update);
     }
@@ -7474,7 +7500,7 @@ mod tests {
     #[test]
     fn the_first_page_has_no_edge_swipe_back() {
         let f = fonts();
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.touch(Touch::Down(10.0, 1600.0), &f, 0);
         app.touch(Touch::Move(80.0, 1600.0), &f, 8);
         assert!(app.touch(Touch::Move(400.0, 1600.0), &f, 16).is_empty(), "no tap of the motor");
@@ -7530,7 +7556,7 @@ mod tests {
     #[test]
     fn pulling_past_the_top_resists_and_springs_back() {
         let f = fonts();
-        let mut app = App::new(Screen::Reboot, W, H, PPD);
+        let mut app = hyperos_app(Screen::Reboot, W, H, PPD);
         app.touch(Touch::Down(700.0, 1000.0), &f, 0);
         app.touch(Touch::Move(700.0, 1300.0), &f, 100);
         app.touch(Touch::Move(700.0, 1800.0), &f, 600);
@@ -7553,7 +7579,7 @@ mod tests {
     #[test]
     fn a_page_pulled_past_its_end_can_be_caught() {
         let f = fonts();
-        let mut app = App::new(Screen::Reboot, W, H, PPD);
+        let mut app = hyperos_app(Screen::Reboot, W, H, PPD);
         app.touch(Touch::Down(700.0, 1000.0), &f, 0);
         app.touch(Touch::Move(700.0, 1500.0), &f, 500);
         app.touch(Touch::Up, &f, 1000);
@@ -7570,7 +7596,7 @@ mod tests {
     #[test]
     fn scrolling_back_down_past_the_top_pulls_from_the_top() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         app.frame(&f, &i);
         app.touch(Touch::Down(700.0, 2000.0), &f, 0);
         app.touch(Touch::Move(700.0, 1700.0), &f, 100);
@@ -7583,7 +7609,7 @@ mod tests {
     #[test]
     fn dragging_scrolls_and_does_not_tap() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         let (x, y) = spot(&mut app, &f, &i, Action::Toggle(Switch::Vibrate));
         assert!(y < H as f32, "the switch is on the first screen");
         app.touch(Touch::Down(x, y), &f, 0);
@@ -7597,7 +7623,7 @@ mod tests {
     #[test]
     fn the_file_transfer_switch_has_the_runtime_follow_it() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         assert!(app.state.file_transfer, "on until turned off");
         let (_, y) = spot(&mut app, &f, &i, Action::Toggle(Switch::FileTransfer));
         if y > H as f32 * 0.9 {
@@ -7644,7 +7670,7 @@ mod tests {
             battery: Some(battery),
             ..info()
         };
-        let mut app = App::new(Screen::Specs, W, H, PPD);
+        let mut app = hyperos_app(Screen::Specs, W, H, PPD);
         app.frame(&f, &i);
         let lift = flick(&mut app, &f, 1000, 20.0);
         let lifted = app.top().1;
@@ -7663,7 +7689,7 @@ mod tests {
     #[test]
     fn a_page_drawn_again_as_work_goes_on_keeps_its_scroll() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.backup_started(false, Place::Storage, true);
         app.backup_plan((0..20).map(|k| (format!("part{k}"), 1_000_000)).collect());
         let at = |done| BackupAt { item: 0, done, of: 1_000_000, checking: false };
@@ -7691,7 +7717,7 @@ mod tests {
     #[test]
     fn a_glide_into_the_end_swings_past_it_and_back() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         app.frame(&f, &i);
         let lift = flick(&mut app, &f, 1000, 80.0);
         let mut furthest: f32 = 0.0;
@@ -7708,7 +7734,7 @@ mod tests {
     #[test]
     fn a_finger_that_stops_before_lifting_leaves_the_page_still() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         app.frame(&f, &i);
         app.touch(Touch::Down(700.0, 2400.0), &f, 1000);
         app.touch(Touch::Move(700.0, 2200.0), &f, 1008);
@@ -7721,7 +7747,7 @@ mod tests {
     #[test]
     fn touching_a_gliding_page_stops_it_without_pressing() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         app.frame(&f, &i);
         let lift = flick(&mut app, &f, 1000, 20.0);
         app.tick(lift + 30);
@@ -7774,7 +7800,7 @@ mod tests {
     #[test]
     fn a_button_stops_a_gliding_page() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         app.frame(&f, &i);
         let lift = flick(&mut app, &f, 1000, 20.0);
         assert!(app.fling.is_some(), "the page is gliding");
@@ -7800,7 +7826,7 @@ mod tests {
     #[test]
     fn the_bar_title_comes_after_the_large_title_fades_and_the_bar_once_content_slides_under() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         let fr = app.frame(&f, &i);
         let content_top = fr.content_top;
         let m = app.theme().m;
@@ -7822,7 +7848,7 @@ mod tests {
     #[test]
     fn the_about_page_brings_title_and_bar_together_once_the_version_fades() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::About, W, H, PPD);
+        let mut app = hyperos_app(Screen::About, W, H, PPD);
         app.frame(&f, &i);
         let t = app.theme();
         let gone = t.m.dp(ABOUT_LOGO_DP) - widgets::bar_bottom(&t);
@@ -7836,7 +7862,7 @@ mod tests {
     #[test]
     fn a_scrolled_page_gone_back_to_has_its_bar_from_its_first_frame() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         tap(&mut app, &f, &i, Action::Open(Screen::Settings));
         app.frame(&f, &i);
         let end = app.max_scroll();
@@ -7857,7 +7883,7 @@ mod tests {
     #[test]
     fn theme_previews_switch_the_theme() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         tap(&mut app, &f, &i, Action::Theme { dark: true });
         assert!(app.state.dark);
         assert!(app.theme().dark);
@@ -7868,7 +7894,7 @@ mod tests {
     #[test]
     fn dragging_the_track_sets_brightness() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         let track = app.frame(&f, &i).hits.iter().find(|h| h.action == Action::Slider(Slider::Brightness)).unwrap().rect;
         let y = track.centre().1 - app.top().1;
         assert!(app.touch(Touch::Down(track.x + track.w * 0.25, y), &f, 0).is_empty());
@@ -7882,7 +7908,7 @@ mod tests {
     #[test]
     fn the_strength_slider_taps_the_motor_as_strongly_as_it_is_let_go() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         let track = app.frame(&f, &i).hits.iter().find(|h| h.action == Action::Slider(Slider::Vibration)).unwrap().rect;
         let y = track.centre().1 - app.top().1;
         assert!(app.touch(Touch::Down(track.x + track.w * 0.25, y), &f, 0).is_empty());
@@ -7900,7 +7926,7 @@ mod tests {
     #[test]
     fn swiping_the_knob_reboots_to_the_chosen_target() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Reboot, W, H, PPD);
+        let mut app = hyperos_app(Screen::Reboot, W, H, PPD);
         tap(&mut app, &f, &i, Action::RebootTarget(3));
         let track = app.frame(&f, &i).hits.iter().find(|h| h.action == Action::Confirm(Confirm::Reboot)).unwrap().rect;
         let y = track.centre().1;
@@ -7915,7 +7941,7 @@ mod tests {
     #[test]
     fn letting_go_halfway_does_not_reboot() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Reboot, W, H, PPD);
+        let mut app = hyperos_app(Screen::Reboot, W, H, PPD);
         let track = app.frame(&f, &i).hits.iter().find(|h| h.action == Action::Confirm(Confirm::Reboot)).unwrap().rect;
         let y = track.centre().1;
         app.touch(Touch::Down(track.x + track.h / 2.0, y), &f, 0);
@@ -7926,7 +7952,7 @@ mod tests {
     #[test]
     fn a_control_that_cannot_work_explains_itself() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Mount, W, H, PPD);
+        let mut app = hyperos_app(Screen::Mount, W, H, PPD);
         app.set_mounts(Ok(vec![MountRow { base: "odm".into(), point: "/odm".into(), mounted: true, holders: vec!["qseecomd".into()] }]));
         tap(&mut app, &f, &i, Action::Unavailable("无法卸载正在使用的分区"));
         assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("无法卸载正在使用的分区"));
@@ -8074,7 +8100,7 @@ mod tests {
     #[test]
     fn fastboot_is_chosen_and_restarted_to_like_any_target() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Reboot, W, H, PPD);
+        let mut app = hyperos_app(Screen::Reboot, W, H, PPD);
         let fastboot = TARGETS.iter().position(|t| *t == Target::Fastboot).unwrap();
         tap(&mut app, &f, &i, Action::RebootTarget(fastboot));
         assert_eq!(app.state.reboot, fastboot);
@@ -8109,7 +8135,7 @@ mod tests {
     fn the_keys_reach_the_last_row_of_a_home_page_grown_by_an_update_notice() {
         let f = fonts();
         let i = DeviceInfo { snapshot: SnapshotState::Snapshotted, ..info() };
-        let mut app = App::new(Screen::Home, W, SNUG, PPD);
+        let mut app = hyperos_app(Screen::Home, W, SNUG, PPD);
         let (_, y) = spot(&mut app, &f, &i, Action::Open(Screen::Reboot));
         assert!(y > SNUG as f32, "below the screen to start with");
         light_on(&mut app, &f, &i, Stop::Hit(Action::Open(Screen::Reboot)));
@@ -8125,7 +8151,7 @@ mod tests {
     #[test]
     fn the_fastboot_page_is_worked_with_the_keys() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Fastboot, W, H, PPD);
+        let mut app = hyperos_app(Screen::Fastboot, W, H, PPD);
         let choice = |k: usize| Some(Stop::Hit(FASTBOOT_CHOICES[k].1));
         assert_eq!(lit(&mut app, &f, &i), choice(0), "the first choice is lit as the page opens");
         assert!(press(&mut app, Key::VolumeDown, 0).is_empty());
@@ -8145,7 +8171,7 @@ mod tests {
     #[test]
     fn the_recovery_comes_up_from_fastboot_at_the_home_page() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Fastboot, W, H, PPD);
+        let mut app = hyperos_app(Screen::Fastboot, W, H, PPD);
         app.frame(&f, &i);
         app.enter_recovery();
         assert_eq!(app.screen(), Screen::Home);
@@ -8161,7 +8187,7 @@ mod tests {
     #[test]
     fn without_a_touchscreen_the_first_control_is_lit_at_once() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.frame(&f, &i);
         assert_eq!(app.light(0.0), None, "a page opens to the touch");
         app.touchscreen_missing();
@@ -8173,7 +8199,7 @@ mod tests {
     #[test]
     fn the_volume_keys_light_the_controls_down_the_page_and_up_it() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.frame(&f, &i);
         assert!(!app.keys, "a page opens to the touch");
         press(&mut app, Key::VolumeDown, 0);
@@ -8199,7 +8225,7 @@ mod tests {
     #[test]
     fn the_power_key_works_the_control_lit_as_it_comes_up() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.frame(&f, &i);
         light_on(&mut app, &f, &i, Stop::Hit(Action::Open(Screen::Settings)));
         assert!(app.key(Key::Power, 0).is_empty());
@@ -8223,7 +8249,7 @@ mod tests {
     #[test]
     fn past_the_last_control_the_keys_scroll_on_half_a_screen_a_press() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Installing, W, H, PPD);
+        let mut app = hyperos_app(Screen::Installing, W, H, PPD);
         app.state.install = Install::Finished { outcome: Outcome::Ran { wipe_cache: false }, damage: None };
         app.state.script_output = (0..300).map(|k| format!("- line {k}")).collect();
         app.frame(&f, &i);
@@ -8258,7 +8284,7 @@ mod tests {
     #[test]
     fn the_power_key_held_slides_a_swipe_control_and_confirms_it_let_go() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Reboot, W, H, PPD);
+        let mut app = hyperos_app(Screen::Reboot, W, H, PPD);
         app.frame(&f, &i);
         light_on(&mut app, &f, &i, Stop::Hit(Action::Confirm(Confirm::Reboot)));
         assert!(press(&mut app, Key::Power, 0).is_empty());
@@ -8286,7 +8312,7 @@ mod tests {
     #[test]
     fn the_brightness_slider_takes_the_volume_keys_until_the_power_key_lets_it_go() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         app.frame(&f, &i);
         light_on(&mut app, &f, &i, Stop::Hit(Action::Slider(Slider::Brightness)));
         assert_eq!(app.state.brightness, SLIDER_START, "it starts a step from its left end");
@@ -8308,7 +8334,7 @@ mod tests {
     #[test]
     fn the_strength_slider_taps_the_motor_at_each_step_of_the_keys() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         app.frame(&f, &i);
         light_on(&mut app, &f, &i, Stop::Hit(Action::Slider(Slider::Vibration)));
         press(&mut app, Key::Power, 0);
@@ -8327,7 +8353,7 @@ mod tests {
     #[test]
     fn the_keys_join_a_patterns_dots_and_end_it_on_the_last_one_joined() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        let mut app = hyperos_app(Screen::Decrypt, W, H, PPD);
         app.data_waiting(Some((0, Keys::Pattern)));
         app.frame(&f, &i);
         press(&mut app, Key::VolumeDown, 0);
@@ -8363,7 +8389,7 @@ mod tests {
     #[test]
     fn the_keys_type_a_screen_locks_code_on_its_keypad() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        let mut app = hyperos_app(Screen::Decrypt, W, H, PPD);
         app.data_waiting(Some((0, Keys::Digits)));
         app.frame(&f, &i);
         for ch in ['2', '5', '8', '0'] {
@@ -8378,7 +8404,7 @@ mod tests {
     #[test]
     fn the_power_key_held_on_an_entry_opens_what_can_be_done_with_it() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
         tap(&mut app, &f, &i, Action::Open(Screen::Files));
         app.set_files("/".into(), Ok(vec![entry("vendor", folder(12)), entry("init.rc", FileKind::File)]), LISTED);
         app.frame(&f, &i);
@@ -8401,7 +8427,7 @@ mod tests {
     #[test]
     fn a_touch_puts_the_light_out_and_a_volume_key_brings_it_back() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.frame(&f, &i);
         light_on(&mut app, &f, &i, Stop::Hit(Action::Open(Screen::About)));
         let mut c = Canvas::new(W, H);
@@ -8424,7 +8450,7 @@ mod tests {
     #[test]
     fn a_volume_key_held_moves_the_light_on_and_on() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.frame(&f, &i);
         app.key(Key::VolumeDown, 0);
         assert_eq!(app.deadline(0), Some(CHORD_MS), "it waits for the power key first");
@@ -8445,7 +8471,7 @@ mod tests {
     #[test]
     fn climbing_out_of_a_folder_the_keys_come_back_to_it() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
         tap(&mut app, &f, &i, Action::Open(Screen::Files));
         let folders: Vec<FileRow> = (0..300).map(|k| entry(&format!("dir{k:03}"), folder(k))).collect();
         app.set_files("/".into(), Ok(folders.clone()), LISTED);
@@ -8470,7 +8496,7 @@ mod tests {
     #[test]
     fn the_cant_start_page_retries_looks_around_or_erases() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::CantStart, W, H, PPD);
+        let mut app = hyperos_app(Screen::CantStart, W, H, PPD);
         app.set_asked(Asked { reason: Some("RescueParty".into()), ..Asked::default() });
         assert_eq!(tap(&mut app, &f, &i, Action::RebootTo(Target::System)), vec![Effect::Reboot(Target::System)]);
         assert_eq!(swipe(&mut app, &f, &i, Confirm::FactoryReset), vec![Effect::FactoryReset]);
@@ -8483,7 +8509,7 @@ mod tests {
     #[test]
     fn erasing_goes_part_by_part_and_offers_a_way_out_once_it_stops() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::CantStart, W, H, PPD);
+        let mut app = hyperos_app(Screen::CantStart, W, H, PPD);
         app.erase_started(true, true, vec![Part::Data, Part::Metadata]);
         assert_eq!(app.screen(), Screen::Erase);
         assert!(app.frame(&f, &i).hits.is_empty(), "nothing is to be done while erasing");
@@ -8505,7 +8531,7 @@ mod tests {
     #[test]
     fn erasing_that_ends_well_leaves_nothing_to_choose() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.erase_started(false, true, vec![Part::Cache]);
         app.erase_ended(Ok(()), 0);
         assert_eq!(app.state.erase.done, 1, "every part is erased");
@@ -8553,7 +8579,7 @@ mod tests {
     #[test]
     fn erasing_the_user_chose_tells_its_progress_and_waits_for_them_at_the_end() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.erase_started(false, false, vec![Part::Media, Part::Art]);
         app.erase_progress(30, 120);
         assert_eq!(app.state.erase.progress, Some((30, 120)));
@@ -8573,7 +8599,7 @@ mod tests {
     #[test]
     fn parts_waiting_on_a_locked_user_erase_nothing_and_send_the_user_home_to_decrypt() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.state.data = Data::Locked { user: 0, keys: Keys::Digits, checking: false };
         app.erase_started(false, false, vec![Part::AppCaches, Part::Logs]);
         app.erase_ended(Err(EraseStop::Locked(vec![0])), 0);
@@ -8588,7 +8614,7 @@ mod tests {
     #[test]
     fn a_data_partition_erased_whole_is_not_opened_again() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.state.data = Data::Open;
         app.erase_started(true, false, vec![Part::Data, Part::Metadata]);
         app.erase_ended(Ok(()), 0);
@@ -8771,7 +8797,7 @@ mod tests {
     #[test]
     fn work_the_recovery_does_not_do_is_shown_with_where_to_go() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Unhandled, W, H, PPD);
+        let mut app = hyperos_app(Screen::Unhandled, W, H, PPD);
         app.set_asked(Asked { unhandled: Some("--update_package=/data/ota_package/update.zip".into()), ..Asked::default() });
         assert_eq!(tap(&mut app, &f, &i, Action::RebootTo(Target::System)), vec![Effect::Reboot(Target::System)]);
         assert_eq!(tap(&mut app, &f, &i, Action::Dismiss), vec![Effect::Dismiss]);
@@ -8808,11 +8834,11 @@ mod tests {
             (Screen::Specs, Screen::FontLicense),
         ];
         for (from, to) in routes {
-            let mut app = App::new(from, W, H, PPD);
+            let mut app = hyperos_app(from, W, H, PPD);
             tap(&mut app, &f, &i, Action::Open(to));
             assert_eq!(app.screen(), to, "from {from:?}");
         }
-        let mut app = App::new(Screen::Reboot, W, H, PPD);
+        let mut app = hyperos_app(Screen::Reboot, W, H, PPD);
         tap(&mut app, &f, &i, Action::Open(Screen::Slot));
         assert_eq!(app.screen(), Screen::Slot);
     }
@@ -8820,7 +8846,7 @@ mod tests {
     #[test]
     fn logs_are_exported_as_ticked_where_they_can_go() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Logs, W, H, PPD);
+        let mut app = hyperos_app(Screen::Logs, W, H, PPD);
         let both = Effect::ExportLogs { recovery: true, kernel: true, storage: false };
         assert_eq!(tap(&mut app, &f, &i, Action::ExportLogs), vec![both], "both, to the temporary folder, at first");
         tap(&mut app, &f, &i, Action::LogPart(0));
@@ -8837,7 +8863,7 @@ mod tests {
     #[test]
     fn a_time_zone_chosen_is_the_one_kept() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         tap(&mut app, &f, &i, Action::Open(Screen::TimeZone));
         assert_eq!(app.state.time_zone, 0, "China until another is chosen");
         let london = TIME_ZONES.iter().position(|&(_, _, name)| name == "Europe/London").expect("London is listed");
@@ -8892,7 +8918,7 @@ mod tests {
     #[test]
     fn backups_found_are_listed_newest_first_and_those_unread_last() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Restore)), vec![Effect::FindBackups { storage: false, usb: false }]);
         let unread = BackupEntry { place: Place::Storage, name: "20261021-150000".into(), held: Err("read backup.toml: not found".into()) };
         let (old, new) = (found(Place::UsbDrive, 1_792_000_000, [true; 4]), found(Place::Storage, 1_792_348_260, [true; 4]));
@@ -8978,7 +9004,7 @@ mod tests {
     #[test]
     fn a_backup_on_a_drive_pulled_out_leaves_its_page() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.set_usb_drive(Some(UsbDrive::Shown));
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Restore)), vec![Effect::FindBackups { storage: false, usb: true }]);
         app.set_backups(vec![found(Place::UsbDrive, 1_792_348_260, [true; 4])]);
@@ -9029,7 +9055,7 @@ mod tests {
     #[test]
     fn the_slot_page_switches_to_the_slot_picked() {
         let (f, i) = (fonts(), DeviceInfo { slot: Some(Slot::B), ..info() });
-        let mut app = App::new(Screen::Reboot, W, H, PPD);
+        let mut app = hyperos_app(Screen::Reboot, W, H, PPD);
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Slot)), vec![Effect::ReadSlots], "read as the page opens");
         let held = BootSlots { next_known: true, active: Slot::B, bootable: [false, true], successful: [true, true] };
         app.set_boot_slots(Ok(held));
@@ -9048,7 +9074,7 @@ mod tests {
     #[test]
     fn the_slot_stays_as_an_update_in_flight_set_it() {
         let (f, i) = (fonts(), DeviceInfo { slot: Some(Slot::B), snapshot: SnapshotState::Snapshotted, ..info() });
-        let mut app = App::new(Screen::Slot, W, H, PPD);
+        let mut app = hyperos_app(Screen::Slot, W, H, PPD);
         app.set_boot_slots(Ok(BootSlots { next_known: true, active: Slot::A, bootable: [true, true], successful: [false, true] }));
         assert!(app.frame(&f, &i).hits.iter().all(|h| !matches!(h.action, Action::Confirm(_))), "nothing to swipe");
     }
@@ -9061,7 +9087,7 @@ mod tests {
     #[test]
     fn the_decrypt_page_opens_the_partition_and_then_asks_with_the_users_own_control() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Decrypt)), vec![Effect::OpenData], "no swipe first");
         assert_eq!(app.state.data, Data::Opening);
         assert!(!keys_shown(&mut app, &f, &i) && app.frame(&f, &i).pattern.is_none(), "nothing to answer yet");
@@ -9071,7 +9097,7 @@ mod tests {
         assert!(keys_shown(&mut app, &f, &i), "for a code, the keypad");
         app.key(Key::Back, 0);
         assert!(tap(&mut app, &f, &i, Action::Open(Screen::Decrypt)).is_empty(), "open already, it is not opened again");
-        let mut first = App::new(Screen::Decrypt, W, H, PPD);
+        let mut first = hyperos_app(Screen::Decrypt, W, H, PPD);
         assert_eq!(first.arrive(), vec![Effect::OpenData], "a recovery that starts on the page opens it as well");
     }
 
@@ -9081,7 +9107,7 @@ mod tests {
         let mut app = opened(Screen::Decrypt, &f, &i);
         tap(&mut app, &f, &i, Action::Skip);
         assert_eq!((app.screen(), app.stack.len()), (Screen::Home, 1), "back on the home page, with no other behind it");
-        let mut first = App::new(Screen::Decrypt, W, H, PPD);
+        let mut first = hyperos_app(Screen::Decrypt, W, H, PPD);
         first.arrive();
         tap(&mut first, &f, &i, Action::Skip);
         assert_eq!((first.screen(), first.stack.len()), (Screen::Home, 1), "a recovery that started on the page goes on to the home page");
@@ -9090,7 +9116,7 @@ mod tests {
     #[test]
     fn the_code_typed_on_the_keypad_is_sent_once_and_checked_before_more_is_taken() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        let mut app = hyperos_app(Screen::Decrypt, W, H, PPD);
         app.data_waiting(Some((0, Keys::Digits)));
         for ch in "1234".chars() {
             tap(&mut app, &f, &i, Action::Type(Cap::Char(ch)));
@@ -9113,7 +9139,7 @@ mod tests {
     #[test]
     fn nothing_typed_is_not_sent() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        let mut app = hyperos_app(Screen::Decrypt, W, H, PPD);
         app.data_waiting(Some((0, Keys::Digits)));
         assert!(tap(&mut app, &f, &i, Action::Type(Cap::Enter)).is_empty());
         assert_eq!(app.deadline(0), Some(TOAST_MS), "the page says to type one first");
@@ -9122,7 +9148,7 @@ mod tests {
     #[test]
     fn a_pattern_is_sent_as_the_numbers_of_the_dots_it_joins() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        let mut app = hyperos_app(Screen::Decrypt, W, H, PPD);
         app.data_waiting(Some((0, Keys::Pattern)));
         let (cx, cy, span) = app.frame(&f, &i).pattern.expect("the grid is on the page");
         let dots = widgets::pattern_dots(cx, cy, span);
@@ -9140,7 +9166,7 @@ mod tests {
     #[test]
     fn a_pattern_too_short_to_be_one_is_not_sent() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        let mut app = hyperos_app(Screen::Decrypt, W, H, PPD);
         app.data_waiting(Some((0, Keys::Pattern)));
         let (cx, cy, span) = app.frame(&f, &i).pattern.expect("the grid is on the page");
         let dots = widgets::pattern_dots(cx, cy, span);
@@ -9155,7 +9181,7 @@ mod tests {
     #[test]
     fn a_partition_that_did_not_open_says_why_and_is_tried_again() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Decrypt, W, H, PPD);
+        let mut app = hyperos_app(Screen::Decrypt, W, H, PPD);
         app.arrive();
         app.data_failed("KeyMint is not running".into());
         assert_eq!(tap(&mut app, &f, &i, Action::OpenData), vec![Effect::OpenData]);
@@ -9221,7 +9247,7 @@ mod tests {
     #[test]
     fn the_terminal_sends_every_key_to_its_shell() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Settings, W, H, PPD);
+        let mut app = hyperos_app(Screen::Settings, W, H, PPD);
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Terminal)), vec![Effect::StartShell("/".into())], "the page asks for a shell the first time");
         let (rows, cols) = app.term_size(&f);
         assert!(rows >= 20 && cols >= 40, "a screen of {rows} rows by {cols}");
@@ -9242,7 +9268,7 @@ mod tests {
     #[test]
     fn the_file_managers_button_opens_the_terminal_in_the_folder_shown() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Files, W, H, PPD);
+        let mut app = hyperos_app(Screen::Files, W, H, PPD);
         app.set_files("/sdcard/Download".into(), Ok(vec![entry("a.txt", FileKind::File)]), 0);
         assert_eq!(app.frame(&f, &i).button, Some((widgets::Glyph::Terminal, Action::TerminalHere)));
         assert_eq!(tap_button(&mut app, &f, &i, 0), vec![Effect::StartShell("/sdcard/Download".into())], "a shell starts there");
@@ -9261,7 +9287,7 @@ mod tests {
     #[test]
     fn the_bars_round_button_darkens_under_a_finger_on_the_frames_drawn() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Files, W, H, PPD);
+        let mut app = hyperos_app(Screen::Files, W, H, PPD);
         app.set_files("/data/adb".into(), Ok(vec![entry("a.txt", FileKind::File)]), LISTED);
         let t = app.theme();
         let (cx, cy, _) = widgets::button_disc(&t);
@@ -9295,7 +9321,7 @@ mod tests {
     #[test]
     fn a_drag_on_the_terminal_scrolls_back_through_what_the_shell_wrote() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Terminal, W, H, PPD);
+        let mut app = hyperos_app(Screen::Terminal, W, H, PPD);
         let (rows, cols) = app.term_size(&f);
         app.term_started(rows, cols);
         let many: String = (0..100).map(|n| format!("line {n}\r\n")).collect();
@@ -9323,7 +9349,7 @@ mod tests {
     #[test]
     fn the_file_manager_walks_folders_and_back_up_to_the_root() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Files)), vec![Effect::ReadDir("/".into())]);
         let link = FileKind::Link { target: "/storage/self/primary".into(), folder: true };
         app.set_files("/".into(), Ok(vec![entry("sdcard", link), entry("vendor", folder(12)), entry("init.rc", FileKind::File)]), LISTED);
@@ -9425,7 +9451,7 @@ mod tests {
 
     /// The file manager in /sdcard, listing a folder and a file.
     fn in_sdcard(f: &Fonts, i: &DeviceInfo) -> App {
-        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
         tap(&mut app, f, i, Action::Open(Screen::Files));
         app.set_files("/sdcard".into(), Ok(vec![entry("DCIM", folder(2)), entry("a.zip", FileKind::File)]), LISTED);
         app
@@ -9586,7 +9612,7 @@ mod tests {
     #[test]
     fn a_text_file_opens_to_edit_and_saves_what_was_typed() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
         tap(&mut app, &f, &i, Action::Open(Screen::Files));
         app.set_files("/data/adb".into(), Ok(vec![entry("run.sh", FileKind::File)]), LISTED);
         assert_eq!(tap(&mut app, &f, &i, Action::OpenEntry(0)), vec![Effect::OpenText("/data/adb/run.sh".into())]);
@@ -9621,7 +9647,7 @@ mod tests {
     #[test]
     fn leaving_the_editor_with_changes_unsaved_takes_going_back_again() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Files, W, H, PPD);
+        let mut app = hyperos_app(Screen::Files, W, H, PPD);
         app.set_files("/tmp".into(), Ok(vec![entry("a.txt", FileKind::File)]), LISTED);
         app.text_opened(&f, "/tmp/a.txt".into(), Ok(Some(b"a".to_vec())), 0);
         tap(&mut app, &f, &i, Action::Type(Cap::Char('b')));
@@ -9730,7 +9756,7 @@ mod tests {
     #[test]
     fn relabeling_starts_once_the_data_partition_is_open_and_its_page_follows_it() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
         tap(&mut app, &f, &i, Action::Open(Screen::Relabel));
         assert_eq!(app.screen(), Screen::Relabel);
         assert!(swipe(&mut app, &f, &i, Confirm::Relabel).is_empty());
@@ -9777,7 +9803,7 @@ mod tests {
     #[test]
     fn the_filesystem_page_does_to_a_partition_what_is_chosen_and_reads_them_again_after() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Filesystems)), vec![Effect::ReadFilesystems]);
         app.set_filesystems(Ok(fs_rows()));
         tap(&mut app, &f, &i, Action::OpenFilesystem(2));
@@ -9806,7 +9832,7 @@ mod tests {
     #[test]
     fn work_on_the_data_partition_waits_for_it_to_open_and_leaves_it_closed() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Filesystems, W, H, PPD);
+        let mut app = hyperos_app(Screen::Filesystems, W, H, PPD);
         app.set_filesystems(Ok(fs_rows()));
         tap(&mut app, &f, &i, Action::OpenFilesystem(0));
         tap(&mut app, &f, &i, Action::ChooseFs(FsChoice::Repair));
@@ -9832,7 +9858,7 @@ mod tests {
     #[test]
     fn partition_work_the_system_asked_for_is_the_only_page_and_offers_somewhere_to_go_only_when_it_fell_short() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.part_work_started(PartKind::Disable, true);
         assert_eq!(app.stack.len(), 1);
         assert_eq!(app.screen(), Screen::PartWork);
@@ -9858,7 +9884,7 @@ mod tests {
     #[test]
     fn an_update_the_system_asked_for_waits_for_the_files_that_hold_it() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.start_asked(false, "/sdcard/update.zip".into());
         assert_eq!((app.screen(), app.state.source), (Screen::Installing, Source::Asked { security: false }));
         app.asked_opening();
@@ -9875,7 +9901,7 @@ mod tests {
     #[test]
     fn rescue_stays_for_one_command_after_another_until_its_page_is_left() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.start_rescue();
         assert_eq!((app.screen(), app.state.source), (Screen::Installing, Source::Rescue));
         app.install(Event::Waiting, 0);
@@ -9928,7 +9954,7 @@ mod tests {
     #[test]
     fn the_wlan_page_joins_a_network_with_its_password_and_leaves_it() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let entry = |app: &mut App| app.frame(&f, &i).hits.iter().any(|h| h.action == Action::Open(Screen::Wlan));
         assert!(!entry(&mut app), "a phone whose WLAN is not brought up has no WLAN");
         app.state.wlan = Some(Wlan::default());
@@ -9974,7 +10000,7 @@ mod tests {
     #[test]
     fn a_refused_password_is_asked_for_again_from_the_networks_row() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.state.wlan = Some(joined("Skyward", Joining::WrongPassword));
         app.act(Action::Open(Screen::Wlan), 0);
         tap(&mut app, &f, &i, Action::OpenJoined);
@@ -9992,7 +10018,7 @@ mod tests {
     #[test]
     fn the_status_bar_shows_the_network_joined_and_how_fast_data_goes_without_the_page_drawn_again() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.set_wlan(Wlan { power: Power::On, networks: Vec::new(), joined: None });
         assert!(app.wlan_mark().is_none(), "no network joined");
         app.set_wlan(joined("Skyward", Joining::Addressing));
@@ -10011,7 +10037,7 @@ mod tests {
     #[test]
     fn a_network_is_added_by_hand_with_its_name_protection_and_password() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.state.wlan = Some(Wlan { power: Power::On, networks: Vec::new(), joined: None });
         app.act(Action::Open(Screen::Wlan), 0);
         tap(&mut app, &f, &i, Action::AddNetwork);
@@ -10064,7 +10090,7 @@ mod tests {
     #[test]
     fn a_network_added_by_hand_is_turned_down_for_a_name_too_long_and_joined_open_without_its_password() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.state.wlan = Some(Wlan { power: Power::On, networks: vec![network("Skyward-Open", -72, Security::Open)], joined: None });
         app.act(Action::Open(Screen::Wlan), 0);
         tap(&mut app, &f, &i, Action::AddNetwork);
@@ -10089,7 +10115,7 @@ mod tests {
     #[test]
     fn the_keys_open_a_list_of_choices_take_one_and_close_it_going_back() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.state.wlan = Some(Wlan { power: Power::On, networks: Vec::new(), joined: None });
         app.act(Action::Open(Screen::Wlan), 0);
         app.act(Action::AddNetwork, 0);
@@ -10114,7 +10140,7 @@ mod tests {
     #[test]
     fn a_choice_shows_held_down_while_touched() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.state.wlan = Some(Wlan { power: Power::On, networks: Vec::new(), joined: None });
         app.act(Action::Open(Screen::Wlan), 0);
         tap(&mut app, &f, &i, Action::AddNetwork);
@@ -10142,7 +10168,7 @@ mod tests {
     #[test]
     fn a_networks_round_button_opens_its_details_and_its_row_joins_it() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let nearby = vec![network("Skyward", -34, Security::Psk), network("Skyward-Open", -72, Security::Open)];
         app.state.wlan = Some(Wlan { power: Power::On, networks: nearby, joined: None });
         app.act(Action::Open(Screen::Wlan), 0);
@@ -10176,7 +10202,7 @@ mod tests {
     fn the_update_page_asks_for_the_newest_system_and_downloads_its_full_package_to_install() {
         let f = fonts();
         let i = DeviceInfo { os_version: Some("OS3.0.308.0.WMACNXM".into()), ..info() };
-        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
         app.state.update_server = true;
         app.state.wlan = Some(Wlan::default());
         app.refresh();
@@ -10217,7 +10243,7 @@ mod tests {
     #[test]
     fn the_update_page_asks_the_server_as_it_opens_once_a_network_is_joined() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
         app.state.wlan = Some(connected("Skyward"));
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Update)), vec![Effect::ReadUpdate], "a phone whose server is not known asks nothing");
         app.key(Key::Back, 0);
@@ -10231,7 +10257,7 @@ mod tests {
     #[test]
     fn a_tap_on_the_text_moves_the_cursor_and_a_drag_or_a_flick_scrolls_it() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Files, W, H, PPD);
+        let mut app = hyperos_app(Screen::Files, W, H, PPD);
         let text: String = (0..200).map(|n| format!("line {n}\n")).collect();
         app.text_opened(&f, "/tmp/long.txt".into(), Ok(Some(text.into_bytes())), 0);
         let (card, pitch) = app.frame(&f, &i).scrollback.expect("the editor's text scrolls");
@@ -10319,7 +10345,7 @@ mod tests {
     #[test]
     fn an_unreadable_folder_offers_nothing_to_open() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Files, W, H, PPD);
+        let mut app = hyperos_app(Screen::Files, W, H, PPD);
         app.set_files("/data".into(), Err("read /data: Permission denied (os error 13)".into()), LISTED);
         let fr = app.frame(&f, &i);
         assert!(fr.hits.is_empty() && fr.rows.is_none());
@@ -10328,7 +10354,7 @@ mod tests {
     #[test]
     fn a_long_folder_scrolls_to_its_last_entry_in_one_list() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Files, W, H, PPD);
+        let mut app = hyperos_app(Screen::Files, W, H, PPD);
         let many: Vec<FileRow> = (0..5000).map(|k| entry(&format!("IMG_{k:05}.jpg"), FileKind::File)).collect();
         app.set_files("/sdcard/DCIM/Camera".into(), Ok(many), LISTED);
         let rows = app.frame(&f, &i).rows.as_ref().expect("the entries are listed").count();
@@ -10348,7 +10374,7 @@ mod tests {
     #[test]
     fn a_folder_gone_back_up_to_shows_where_it_was_left() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
         tap(&mut app, &f, &i, Action::Open(Screen::Files));
         let folders: Vec<FileRow> = (0..300).map(|k| entry(&format!("dir{k:03}"), folder(k))).collect();
         app.set_files("/".into(), Ok(folders.clone()), LISTED);
@@ -10367,7 +10393,7 @@ mod tests {
     #[test]
     fn a_folder_opened_or_gone_back_up_to_has_its_bar_from_its_first_frame() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Advanced, W, H, PPD);
+        let mut app = hyperos_app(Screen::Advanced, W, H, PPD);
         tap(&mut app, &f, &i, Action::Open(Screen::Files));
         let folders: Vec<FileRow> = (0..300).map(|k| entry(&format!("dir{k:03}"), folder(k))).collect();
         app.set_files("/".into(), Ok(folders.clone()), LISTED);
@@ -10395,7 +10421,7 @@ mod tests {
     #[test]
     fn the_path_goes_up_from_its_capsules_even_held_under_the_bar() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Files, W, H, PPD);
+        let mut app = hyperos_app(Screen::Files, W, H, PPD);
         let many: Vec<FileRow> = (0..200).map(|k| entry(&format!("lib{k:03}.so"), FileKind::File)).collect();
         app.set_files("/system/lib64".into(), Ok(many), LISTED);
         assert_eq!(tap(&mut app, &f, &i, Action::OpenAncestor(1)), vec![Effect::ReadDir("/system".into())]);
@@ -10434,7 +10460,7 @@ mod tests {
 
     #[test]
     fn power_key_turns_the_panel_off_and_on() {
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         assert!(app.key(Key::Power, 0).is_empty());
         assert_eq!(app.panel(0), Some(SLIDER_START), "it waits for volume down first");
         assert_eq!(app.deadline(0), Some(CHORD_MS));
@@ -10452,7 +10478,7 @@ mod tests {
     #[test]
     fn the_power_key_and_volume_down_together_take_a_screenshot() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.frame(&f, &i);
         app.state.vibrate = true;
         assert!(app.key(Key::Power, 0).is_empty());
@@ -10482,7 +10508,7 @@ mod tests {
     #[test]
     fn the_power_key_and_volume_down_too_far_apart_each_do_their_own() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.frame(&f, &i);
         assert!(app.key(Key::VolumeDown, 0).is_empty());
         assert!(!app.keys, "volume down waits for the power key first");
@@ -10499,7 +10525,7 @@ mod tests {
 
     #[test]
     fn a_screenshot_says_where_it_went() {
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.screenshot_saved(Ok(Shot::Album), 0);
         assert_eq!(app.toast.as_ref().map(|t| t.0.as_str()), Some("截图已保存到相册"));
         app.screenshot_saved(Ok(Shot::Held), 0);
@@ -10517,7 +10543,7 @@ mod tests {
 
     #[test]
     fn left_alone_the_panel_dims_then_goes_off() {
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.tick(0);
         assert_eq!(app.deadline(0), Some(DIMS));
         app.tick(DIMS - 1);
@@ -10536,7 +10562,7 @@ mod tests {
 
     #[test]
     fn time_before_the_first_tick_does_not_count_as_idle() {
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         // The UI started long after boot; the idle clock begins at the
         // first tick, not at zero.
         app.tick(5_000_000);
@@ -10559,7 +10585,7 @@ mod tests {
     #[test]
     fn a_touch_while_dim_brightens_and_still_counts() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.tick(0);
         app.tick(DIMS);
         assert_eq!(app.panel(DIMS + 500), Some(dim_level(SLIDER_START)));
@@ -10574,7 +10600,7 @@ mod tests {
     #[test]
     fn a_touch_on_the_dark_panel_only_lights_it() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         let (x, y) = spot(&mut app, &f, &i, Action::Open(Screen::Settings));
         press(&mut app, Key::Power, 0);
         assert!(app.touch(Touch::Down(x, y), &f, 100).is_empty());
@@ -10636,7 +10662,7 @@ mod tests {
     #[test]
     fn a_finger_held_as_the_panel_goes_off_lets_go() {
         let (f, i) = (fonts(), info());
-        let mut app = App::new(Screen::Reboot, W, H, PPD);
+        let mut app = hyperos_app(Screen::Reboot, W, H, PPD);
         let track = app.frame(&f, &i).hits.iter().find(|h| h.action == Action::Confirm(Confirm::Reboot)).unwrap().rect;
         let y = track.centre().1;
         app.touch(Touch::Down(track.x + track.h / 2.0, y), &f, 0);
@@ -10651,7 +10677,7 @@ mod tests {
 
     #[test]
     fn never_leaves_the_panel_on() {
-        let mut app = App::new(Screen::Home, W, H, PPD);
+        let mut app = hyperos_app(Screen::Home, W, H, PPD);
         app.state.screen_off = SCREEN_OFF.iter().position(Option::is_none).unwrap();
         app.tick(0);
         assert_eq!(app.deadline(0), None);

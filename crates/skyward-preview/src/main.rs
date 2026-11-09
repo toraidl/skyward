@@ -184,6 +184,10 @@ fn main() -> Result<()> {
             "wipe" => Screen::Wipe,
             "reboot" => Screen::Reboot,
             "wlan" => Screen::Wlan,
+            "decrypt" => Screen::Decrypt,
+            "install" => Screen::Install,
+            "mount" => Screen::Mount,
+            "backup" => Screen::Backup,
             other => return Err(anyhow!("--screen does not know {other}")),
         };
         let mut app = opened(screen, w, h, ppd);

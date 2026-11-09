@@ -14,7 +14,7 @@ use crate::geom::Rect;
 use crate::lang::{Lang, Text};
 use crate::search;
 use crate::term::{self, Term};
-use crate::theme::Theme;
+use crate::theme::{Style, Theme};
 use crate::tr;
 use crate::icons::{self, Icon};
 use crate::widgets::{self, Caption, Detail, Fact, Outline, Row, Spec, Tone, Trail};
@@ -454,11 +454,14 @@ const AUTHOR: &str = "© 2026 Kirk Lin";
 pub fn about(cx: &Ctx) -> Frame {
     let (t, f) = (cx.t, cx.f);
     let m = &t.m;
+    if t.style == Style::ColorOs {
+        return about_coloros(cx);
+    }
     // The page is drawn whole, under the field: laid out first to learn
     // how tall it comes to, then drawn that tall.
-    let (_, _, bottom) = about_cards(cx, &mut Canvas::band(m.w, m.h * 3, 0..0, 0..0, Rgba { r: 0, g: 0, b: 0, a: 0 }));
+    let (_, _, bottom) = about_cards(cx, &mut Canvas::band(m.w, m.h * 3, 0..0, 0..0, Rgba { r: 0, g: 0, b: 0, a: 0 }), m.dp(490.7));
     let mut c = Canvas::new(m.w, fitted(t, bottom));
-    let (out, summary_top, bottom) = about_cards(cx, &mut c);
+    let (out, summary_top, bottom) = about_cards(cx, &mut c, m.dp(490.7));
     let canvas = fit(c, t, bottom);
     let art = HeroArt {
         wordmark: widgets::wordmark(t, f, "Skyward", m.dp(233.7), m.dp(37.8)),
@@ -467,6 +470,23 @@ pub fn about(cx: &Ctx) -> Frame {
         runs: canvas.runs(),
     };
     Frame { header: false, hero: Some(art), ..Frame::new(t, canvas, out, cx.state.lang.pick(ABOUT), summary_top) }
+}
+
+/// The About page under ColorOS: a rounded hero card holding the wordmark
+/// and the update's state, then the same cards the page shows elsewhere.
+fn about_coloros(cx: &Ctx) -> Frame {
+    let (t, f, l) = (cx.t, cx.f, cx.state.lang);
+    let m = &t.m;
+    let mut c = long_page(cx);
+    let top = m.content_top;
+    let note = match &cx.state.update {
+        Standing::None => l.pick(["恢复模式", "恢復模式", "Recovery"]),
+        standing => fmt::update_value(l, standing),
+    };
+    let hero_bottom =
+        widgets::hero_card(&mut c, t, f, top, m.dp(300.0), "Skyward", VERSION, AUTHOR, note);
+    let (out, _, bottom) = about_cards(cx, &mut c, hero_bottom + m.card_gap);
+    Frame::new(t, fit(c, t, bottom), out, l.pick(ABOUT), top)
 }
 
 const MODEL: Text = ["设备型号", "裝置型號", "Model"];
@@ -488,10 +508,10 @@ fn soc(l: Lang, i: &DeviceInfo) -> Option<&str> {
 
 /// The About page's cards on `c`: what touching them does, where the
 /// first starts, and where the last ends.
-fn about_cards(cx: &Ctx, c: &mut Canvas) -> (Vec<Hit>, f32, f32) {
+fn about_cards(cx: &Ctx, c: &mut Canvas, top: f32) -> (Vec<Hit>, f32, f32) {
     let (t, f, i, l) = (cx.t, cx.f, cx.info, cx.state.lang);
     let m = &t.m;
-    let tone = Tone::hero(t);
+    let tone = if t.style == Style::ColorOs { Tone::page(t) } else { Tone::hero(t) };
     let mut out = Vec::new();
 
     let storage = fmt::storage_used(&i.storage).unwrap_or_else(|| fmt::capacity(i.storage.total));
@@ -505,7 +525,7 @@ fn about_cards(cx: &Ctx, c: &mut Canvas) -> (Vec<Hit>, f32, f32) {
     if let Some(r) = &i.android {
         facts.push(Fact { title: l.pick(ANDROID_VERSION), value: r.clone(), link: false });
     }
-    let summary = widgets::facts(c, t, f, m.dp(490.7), &facts, &tone);
+    let summary = widgets::facts(c, t, f, top, &facts, &tone);
     out.push(Hit { rect: summary.rows[1], action: Action::Open(Screen::Specs) });
 
     let processor = soc(l, i).map_or_else(|| fmt::cpu(l, &i.cpu), str::to_string);
@@ -531,8 +551,9 @@ pub fn specs(cx: &Ctx) -> Frame {
     let gap = t.m.card_gap;
     let mut c = long_page(cx);
     let mut out = Vec::new();
-    // This page leaves more room under the title than the settings pages.
-    let top = t.m.dp(188.0);
+    // HyperOS leaves more room under the large title here than the settings
+    // pages; ColorOS's title sits in the header like every other page's.
+    let top = if t.style == Style::ColorOs { t.m.content_top } else { t.m.dp(188.0) };
 
     let mut grid = vec![Spec { icon: Outline::Phone, label: l.pick(MODEL), value: fmt::model_lines(&i.model) }];
     if let Some(design) = i.battery.as_ref().and_then(|b| b.design) {
@@ -670,7 +691,10 @@ fn data_status(cx: &Ctx, mut c: Canvas, icon: Icon, title: &str, note: Option<&s
     let leave = l.pick(if matches!(cx.state.data, Data::Open | Data::Erased) { ["完成", "完成", "Done"] } else { NOT_NOW });
     c.text_center(&f.heading, leave, x, leave_cy, m.row_title_px, t.pal.accent);
     out.push(Hit { rect: Rect::new(x - m.dp(80.0), leave_cy - m.dp(24.0), m.dp(160.0), m.dp(48.0)), action: Action::Skip });
-    Frame { header: false, ..Frame::new(t, c, out, l.pick(DECRYPT), 0.0) }
+    // HyperOS lets the status carry the page alone; ColorOS keeps the bar's
+    // title beside the back disc.
+    let header = t.style == Style::ColorOs;
+    Frame { header, ..Frame::new(t, c, out, l.pick(DECRYPT), if header { m.content_top } else { 0.0 }) }
 }
 
 /// What leaves the decrypt page with the data partition left as it is.
@@ -733,7 +757,8 @@ fn code(cx: &Ctx, mut c: Canvas, user: u32, keys: Keys, checking: bool) -> Frame
     let skip_cy = bottom - m.dp(34.0);
     c.text_center(&f.heading, l.pick(NOT_NOW), x, skip_cy, m.row_title_px, t.pal.accent);
     out.push(Hit { rect: Rect::new(x - m.dp(80.0), skip_cy - m.dp(24.0), m.dp(160.0), m.dp(48.0)), action: Action::Skip });
-    Frame { header: false, pattern, ..Frame::new(t, c, out, l.pick(DECRYPT), 0.0) }
+    let header = t.style == Style::ColorOs;
+    Frame { header, pattern, ..Frame::new(t, c, out, l.pick(DECRYPT), if header { m.content_top } else { 0.0 }) }
 }
 
 /// What a slot is shown as where the boot control could not be read.
