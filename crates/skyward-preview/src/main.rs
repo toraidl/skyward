@@ -807,14 +807,14 @@ fn main() -> Result<()> {
         // restarts the phone itself.
         ("118-update-light-installed-unswitched", Screen::Update, false, &|app| {
             app.set_update(Standing::Installed(Slot::A));
-            app.set_boot_slots(Ok(BootSlots { active: Slot::B, bootable: [false, true], successful: [false, true] }));
+            app.set_boot_slots(Ok(BootSlots { next_known: true, active: Slot::B, bootable: [false, true], successful: [false, true] }));
         }),
         ("116-update-dark-failed", Screen::Update, true, &|app| app.set_update(Standing::Failed(FailureCode::ExpectedMergeTarget))),
         ("117-advanced-light-merged", Screen::Advanced, false, &|app| app.set_update(Standing::Merged)),
         ("58-license-light", Screen::License, false, &|_| {}),
         ("59-font-license-light", Screen::FontLicense, false, &|_| {}),
         ("60-slot-dark", Screen::Slot, true, &|app| {
-            app.set_boot_slots(Ok(BootSlots { active: Slot::B, bootable: [false, true], successful: [true, true] }));
+            app.set_boot_slots(Ok(BootSlots { next_known: true, active: Slot::B, bootable: [false, true], successful: [true, true] }));
             app.state.next_slot = Some(Slot::A);
         }),
         ("60-slot-light-unread", Screen::Slot, false, &|app| {
@@ -972,7 +972,7 @@ fn main() -> Result<()> {
             // The WLAN's row and a restart into the other slot make the page
             // long enough to go on past the fold.
             app.state.wlan = Some(joined(Joining::Connected(router_link())));
-            app.set_boot_slots(Ok(BootSlots { active: Slot::A, bootable: [true, true], successful: [true, true] }));
+            app.set_boot_slots(Ok(BootSlots { next_known: true, active: Slot::A, bootable: [true, true], successful: [true, true] }));
             app.frame(f, &info);
             hold(app, f, 1900.0, 1700.0)
         }),
@@ -1052,7 +1052,7 @@ fn main() -> Result<()> {
         let mut app = App::new(Screen::Home, w, h, ppd);
         app.state.lang = lang;
         app.state.dark = dark;
-        app.set_boot_slots(Ok(BootSlots { active: Slot::A, bootable: [true, true], successful: [true, true] }));
+        app.set_boot_slots(Ok(BootSlots { next_known: true, active: Slot::A, bootable: [true, true], successful: [true, true] }));
         let path = out.join(format!("{name}.png"));
         write_png(&path, &whole_page(&mut app, &fonts, &wanting))?;
         println!("wrote {}", path.display());

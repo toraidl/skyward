@@ -763,6 +763,15 @@ pub fn reboot(cx: &Ctx) -> Frame {
     y = targets.bottom;
     if let Some(slot) = cx.info.slot {
         let next = match &s.boot_slots {
+            Some(Ok(slots)) if !slots.next_known => {
+                let slot = slots.active.letter();
+                tr!(
+                    l,
+                    "{slot}（当前；本机无法预知下次）",
+                    "{slot}（目前；本機無法預知下次）",
+                    "{slot} (current; this phone cannot say what starts next)"
+                )
+            }
             Some(Ok(slots)) if slots.active == slot => {
                 let slot = slot.letter();
                 tr!(l, "{slot}（当前）", "{slot}（目前）", "{slot} (current)")
@@ -2424,7 +2433,7 @@ pub fn update(cx: &Ctx) -> Frame {
         y = online(&mut c, cx, y, &mut out);
     }
     let next = match &s.boot_slots {
-        Some(Ok(slots)) => Some(slots.active),
+        Some(Ok(slots)) if slots.next_known => Some(slots.active),
         _ => None,
     };
     let (title, detail) = fmt::update(l, &s.update, next);
@@ -3329,8 +3338,17 @@ pub fn slot(cx: &Ctx) -> Frame {
         [Slot::A, Slot::B].iter().enumerate().map(|(k, &slot)| Row::new(&titles[k]).subtitle(&subs[k]).trail(Trail::Check(slot == chosen))).collect();
     let list = widgets::list(&mut c, t, f, y, &rows);
     out.extend(hits(&list.rows, &[Slot::A, Slot::B].map(Action::PickSlot)));
+    let mut below = list.bottom;
+    if !slots.next_known {
+        let note = l.pick([
+            "本机的引导控制不提供“下次启动槽位”，上面勾选的是当前运行的槽位。",
+            "本機的引導控制不提供「下次啟動槽位」，上面勾選的是目前執行的槽位。",
+            "This phone's boot control cannot say which slot starts next; the tick is the slot running now.",
+        ]);
+        below = widgets::footnote(&mut c, t, f, below, note);
+    }
     if let Some(note) = fmt::snapshot_slot_note(l, &i.snapshot) {
-        widgets::footnote(&mut c, t, f, list.bottom, note);
+        widgets::footnote(&mut c, t, f, below, note);
         return Frame::new(t, c, out, title, top);
     }
     let note = l.pick([
@@ -3338,7 +3356,7 @@ pub fn slot(cx: &Ctx) -> Frame {
         "另一個槽位中沒有完整的系統時，切換後將無法開機。",
         "If the other slot holds no whole system, the phone won't start after switching.",
     ]);
-    let y = widgets::footnote(&mut c, t, f, list.bottom, note);
+    let y = widgets::footnote(&mut c, t, f, below, note);
     let (label, danger) = confirm_label(Confirm::Slot, cx.state);
     let track = widgets::confirm(&mut c, t, f, y + t.m.dp(24.0), label, danger, s.confirm);
     out.push(Hit { rect: track, action: Action::Confirm(Confirm::Slot) });

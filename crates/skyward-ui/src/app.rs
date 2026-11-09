@@ -6776,7 +6776,7 @@ mod tests {
         let f = fonts();
         let i = DeviceInfo { slot: Some(Slot::B), ..info() };
         let mut app = App::new(Screen::Home, W, H, PPD);
-        let slots = |active| BootSlots { active, bootable: [true, true], successful: [true, true] };
+        let slots = |active| BootSlots { next_known: true, active, bootable: [true, true], successful: [true, true] };
         app.set_boot_slots(Ok(slots(Slot::B)));
         assert!(app.frame(&f, &i).hits.iter().all(|h| h.action != Action::Open(Screen::Slot)), "the slot it runs from starts next");
         app.set_boot_slots(Ok(slots(Slot::A)));
@@ -9007,13 +9007,13 @@ mod tests {
         let (f, i) = (fonts(), DeviceInfo { slot: Some(Slot::B), ..info() });
         let mut app = App::new(Screen::Reboot, W, H, PPD);
         assert_eq!(tap(&mut app, &f, &i, Action::Open(Screen::Slot)), vec![Effect::ReadSlots], "read as the page opens");
-        let held = BootSlots { active: Slot::B, bootable: [false, true], successful: [true, true] };
+        let held = BootSlots { next_known: true, active: Slot::B, bootable: [false, true], successful: [true, true] };
         app.set_boot_slots(Ok(held));
         assert!(swipe(&mut app, &f, &i, Confirm::Slot).is_empty());
         assert_eq!(app.deadline(0), Some(TOAST_MS), "B starts next already");
         tap(&mut app, &f, &i, Action::PickSlot(Slot::A));
         assert_eq!(swipe(&mut app, &f, &i, Confirm::Slot), vec![Effect::SetSlot(Slot::A)]);
-        let switched = BootSlots { active: Slot::A, bootable: [true, true], ..held };
+        let switched = BootSlots { next_known: true, active: Slot::A, bootable: [true, true], ..held };
         app.slot_switched(Ok(switched), 0);
         assert_eq!((app.state.boot_slots.clone(), app.state.next_slot), (Some(Ok(switched)), None), "the pick is done with");
         tap(&mut app, &f, &i, Action::PickSlot(Slot::B));
@@ -9025,7 +9025,7 @@ mod tests {
     fn the_slot_stays_as_an_update_in_flight_set_it() {
         let (f, i) = (fonts(), DeviceInfo { slot: Some(Slot::B), snapshot: SnapshotState::Snapshotted, ..info() });
         let mut app = App::new(Screen::Slot, W, H, PPD);
-        app.set_boot_slots(Ok(BootSlots { active: Slot::A, bootable: [true, true], successful: [false, true] }));
+        app.set_boot_slots(Ok(BootSlots { next_known: true, active: Slot::A, bootable: [true, true], successful: [false, true] }));
         assert!(app.frame(&f, &i).hits.iter().all(|h| !matches!(h.action, Action::Confirm(_))), "nothing to swipe");
     }
 

@@ -66,6 +66,10 @@ impl Slot {
 pub struct BootSlots {
     /// The slot the bootloader starts next.
     pub active: Slot,
+    /// Whether the boot control could say which slot that is. A phone whose
+    /// boot control is older than the 1.2 interface cannot: its next slot
+    /// is unknown, and `active` is only the slot running now.
+    pub next_known: bool,
     /// Of each slot, A first: whether the bootloader may start it, and
     /// whether its system has started fully since it was written.
     pub bootable: [bool; 2],

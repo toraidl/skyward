@@ -874,7 +874,10 @@ fn slot() -> Result<()> {
         match opened {
             Ok(control) => {
                 let slots = control.slots()?;
-                println!("next {}", slots.active.suffix());
+                match slots.next_known {
+                    true => println!("next {}", slots.active.suffix()),
+                    false => println!("next unknown, running {}", slots.active.suffix()),
+                }
                 for slot in [skyward_vab::Slot::A, skyward_vab::Slot::B] {
                     let k = slot.number() as usize;
                     println!("{} bootable {} successful {}", slot.suffix(), slots.bootable[k], slots.successful[k]);

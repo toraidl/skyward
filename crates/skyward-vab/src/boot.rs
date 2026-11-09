@@ -146,7 +146,16 @@ impl<'a> BootControl<'a> {
 
     /// What it holds of the slots now.
     pub fn slots(&self) -> Result<BootSlots> {
-        let mut slots = BootSlots { active: self.active()?, bootable: [false; 2], successful: [false; 2] };
+        // A boot control older than the 1.2 interface cannot say which slot
+        // starts next. The page shows the slot running now and says the
+        // next one is not known, rather than failing the whole reading.
+        let next = self.active();
+        let next_known = next.is_ok();
+        let active = match next {
+            Ok(slot) => slot,
+            Err(e) => crate::current_slot()?.with_context(|| format!("{e:#}"))?,
+        };
+        let mut slots = BootSlots { active, next_known, bootable: [false; 2], successful: [false; 2] };
         for slot in [Slot::A, Slot::B] {
             let at = slot.number() as usize;
             slots.bootable[at] = self.bootable(slot).with_context(|| format!("ask whether slot {} starts", slot.letter()))?;
