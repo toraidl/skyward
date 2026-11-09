@@ -2287,6 +2287,15 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                         skyward_sys::kmsg("merging the update, as the update page asked")?;
                         merger = Some(merge::Merger::start(slot, true)?);
                     }
+                    // A merge that stopped is not written out again: the
+                    // snapshots it left are mapped and carried on from where
+                    // they stopped.
+                    Effect::ResumeMerge => {
+                        ensure!(merger.is_none(), "the update is being merged already");
+                        let slot = info.slot.context("only an A/B phone merges an update")?;
+                        skyward_sys::kmsg("carrying on the merge, as the update page asked")?;
+                        merger = Some(merge::Merger::start(slot, false)?);
+                    }
                     Effect::Wlan(on) => wlan_worker(&wlan)?.send(if on { wlan::Command::On } else { wlan::Command::Off }),
                     Effect::ScanWlan => {
                         scanned_at = Instant::now();

@@ -564,7 +564,13 @@ pub enum Merge {
 /// out, and their copy-on-write devices taken away.
 pub fn initiate(snaps: &Snapshots, current: Slot, md: &Metadata, tell: &dyn Fn(MergeStatus) -> Result<()>) -> Result<()> {
     let mut update = snaps.update()?;
-    ensure!(state_of(&update)? == UpdateState::Unverified, "the update has not been written all the way, or is merging already");
+    match state_of(&update)? {
+        UpdateState::Unverified => {}
+        // A merge that stopped has nothing left to start: the snapshots it
+        // left are put back to merging, and carried on, by [`check`].
+        UpdateState::MergeFailed => return Ok(()),
+        _ => bail!("the update has not been written all the way, or is merging already"),
+    }
     ensure!(snaps.side(current)? == Side::Target, "the phone runs from the slot the update came from, not the one it went to");
     ensure!(!update.using_snapuserd, "the update's snapshots are compressed and served by snapuserd, which this recovery does not run");
     let mut names = snaps.list()?;
@@ -668,6 +674,12 @@ pub fn check(snaps: &Snapshots, current: Slot, md: &Metadata, devices: &[(u32, u
     for name in snaps.list()?.iter().filter(|n| n.ends_with(current.suffix())) {
         match check_target(snaps, md, devices, name, &update)? {
             Target::Merging => merging = true,
+            // The table has fallen back to a plain snapshot, which happens
+            // when a merge is given up on or the phone starts again in the
+            // middle of one. Putting it back to merging carries that merge
+            // on from where it stopped instead of reporting it failed for
+            // ever.
+            Target::Failed(FailureCode::ExpectedMergeTarget) if switch_to_merge(snaps, name).is_ok() => merging = true,
             Target::Failed(code) => {
                 if failure == FailureCode::Ok {
                     failure = code;

@@ -1953,6 +1953,9 @@ pub enum Effect {
     /// Merge the update that waits in the slot the phone runs from,
     /// telling how it goes with [`App::set_update`].
     Merge,
+    /// Carry on a merge that stopped, from where it did, without writing
+    /// the update's snapshots out again.
+    ResumeMerge,
 }
 
 enum Drag {
@@ -6019,12 +6022,13 @@ impl App {
             },
             Confirm::FactoryReset => fx.push(Effect::FactoryReset),
             Confirm::Merge => {
-                // A merge that stopped carries on from where it did, the
-                // same as one that has not started yet does.
+                // A merge that stopped carries on from where it did, while
+                // one that has not started is started.
                 if matches!(self.state.update, Standing::Waiting | Standing::Failed(_)) {
+                    let resume = matches!(self.state.update, Standing::Failed(_));
                     self.state.update = Standing::Merging(0.0);
                     self.refresh();
-                    fx.push(Effect::Merge);
+                    fx.push(if resume { Effect::ResumeMerge } else { Effect::Merge });
                 }
             }
             Confirm::DeleteEntry => fx.push(Effect::Delete(self.entry_path())),
@@ -7418,7 +7422,7 @@ mod tests {
         tap(&mut app, &f, &i, Action::Open(Screen::Update));
         assert_eq!(app.screen(), Screen::Update);
         assert_eq!(crate::pages::confirm_label(Confirm::Merge, &app.state), ("滑动以继续合并", true), "the track carries the merge on");
-        assert_eq!(swipe(&mut app, &f, &i, Confirm::Merge), vec![Effect::Merge]);
+        assert_eq!(swipe(&mut app, &f, &i, Confirm::Merge), vec![Effect::ResumeMerge], "carried on, not started again");
         assert_eq!(app.state.update, Standing::Merging(0.0), "the page turns to the merge at once");
         assert!(app.frame(&f, &i).hits.is_empty(), "nothing to swipe while it merges");
     }
