@@ -1,4 +1,4 @@
-use anyhow::{ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
@@ -223,6 +223,11 @@ const DATA: &str = "/data";
 /// motor's resonant frequency, which the driver plays as they are given.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct Haptics {
+    /// The folder of an LED-class vibrator, such as
+    /// /sys/class/leds/vibrator, that a click buzzes by writing a length
+    /// and a gain. Set, it replaces the force-feedback click below.
+    #[serde(default)]
+    pub led: Option<String>,
     /// The driver's number for a click waveform it keeps, on phones whose
     /// driver plays the waveforms it keeps.
     #[serde(default)]
@@ -565,10 +570,17 @@ impl DeviceConfig {
             ensure!(plain && !folder.is_empty(), "[backup] data_skipped: {folder} is not a path from the top of {DATA}");
         }
         if let Some(haptics) = &cfg.haptics {
-            ensure!(
-                haptics.click.is_some() != haptics.resonance.is_some(),
-                "[haptics] names either a waveform the driver keeps or the file it says the motor's resonant frequency in"
-            );
+            match (&haptics.led, haptics.click.is_some(), haptics.resonance.is_some()) {
+                (Some(_), false, false) => {}
+                (None, true, false) | (None, false, true) => {}
+                (Some(_), _, _) => bail!("[haptics] led names an LED-class vibrator, which the click and resonance fields do not go with"),
+                (None, _, _) => bail!(
+                    "[haptics] names either an LED-class vibrator, a waveform the driver keeps, or the file it says the motor's resonant frequency in"
+                ),
+            }
+            if let Some(dir) = &haptics.led {
+                ensure!(Path::new(dir).is_absolute(), "[haptics] led: {dir} is not an absolute path");
+            }
             if let Some(file) = &haptics.resonance {
                 ensure!(Path::new(file).is_absolute(), "[haptics] resonance: {file} is not an absolute path");
             }
@@ -689,6 +701,12 @@ mod tests {
         let strength = "strength = { lightest = 0.25, strongest = 1.0 }";
         assert!(with(&format!("click = 0\n{strength}")).is_ok());
         assert!(with(&format!("resonance = \"/sys/class/qcom-haptics/lra_frequency_hz\"\n{strength}")).is_ok());
+        assert!(with(&format!("led = \"/sys/class/leds/vibrator\"\n{strength}")).is_ok());
+        assert!(
+            with(&format!("led = \"/sys/class/leds/vibrator\"\nclick = 0\n{strength}")).is_err(),
+            "an LED-class vibrator and a waveform at once"
+        );
+        assert!(with(&format!("led = \"sys/class/leds/vibrator\"\n{strength}")).is_err(), "a vibrator named from nowhere");
         assert!(with(strength).is_err(), "a click of neither kind");
         assert!(with(&format!("click = 0\nresonance = \"/sys/f\"\n{strength}")).is_err(), "a click of both kinds");
         assert!(with(&format!("resonance = \"sys/f\"\n{strength}")).is_err(), "a file named from nowhere");

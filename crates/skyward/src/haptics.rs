@@ -23,21 +23,41 @@ const RATE: u32 = 8000;
 const DRIVE_SWINGS: f32 = 2.0;
 const BRAKE_SWINGS: f32 = 1.5;
 
-/// The vibration motor, played through the kernel's force-feedback
-/// events. The driver fills its queue with a made click's samples as the
-/// click is loaded, refilling it for no second play, and keeps the click
-/// playing after its samples have run out, even when told to stop, until
-/// the click is taken away. So each click is loaded as it is played, at the
-/// strength the slider gives, and taken away once it has played out.
+/// The vibration motor, played one of two ways: through the kernel's
+/// force-feedback events, or as a timed buzz of an LED-class vibrator.
+///
+/// A force-feedback driver fills its queue with a made click's samples as
+/// the click is loaded, refilling it for no second play, and keeps the
+/// click playing after its samples have run out, even when told to stop,
+/// until the click is taken away. So each click is loaded as it is played,
+/// at the strength the slider gives, and taken away once it played out.
+/// An LED-class vibrator instead takes a length and a gain, and its driver
+/// stops the motor itself.
 pub struct Haptics {
-    dev: File,
-    click: Click,
+    motor: Motor,
     strength: Strength,
     /// The click playing, by its slot and its count, until it is taken
     /// away; a click taken away early by the next is not taken away again.
     playing: Arc<Mutex<Option<(i16, u64)>>>,
     clicks: u64,
 }
+
+/// Where a click goes.
+enum Motor {
+    /// A force-feedback click on an input device, loaded and played through
+    /// the effect interface the driver keeps.
+    Effect { dev: File, click: Click },
+    /// An LED-class vibrator driven with a length and a level, as the
+    /// AW8697 behind /sys/class/leds/vibrator: the driver times the buzz
+    /// itself and stops the motor when it ends.
+    Led { dir: PathBuf },
+}
+
+/// How long an LED-class vibrator's click buzzes.
+const BUZZ_MS: u32 = 40;
+
+/// The top of an AW8697's gain, from `AW_HAPTIC_RAM_VBAT_COMP_GAIN`.
+const LED_GAIN_TOP: f32 = 128.0;
 
 /// What a click is.
 enum Click {
@@ -49,53 +69,92 @@ enum Click {
 }
 
 impl Haptics {
-    /// The force-feedback device and the configured click. Loading a click
-    /// fills the driver's queue with what it plays, so the click is loaded
-    /// only as it is played.
+    /// The motor the configuration names and what a click does with it.
+    /// Loading a force-feedback click fills the driver's queue with what it
+    /// plays, so that click is loaded only as it is played.
     pub fn open(cfg: &skyward_config::Haptics) -> Result<Haptics> {
-        let (path, dev) = motor()?;
-        let click = match (cfg.click, &cfg.resonance) {
-            (Some(id), _) => {
-                eprintln!("haptics {}: clicks with waveform {id}", path.display());
-                Click::Kept(id)
+        let motor = match &cfg.led {
+            Some(dir) => {
+                let dir = PathBuf::from(dir);
+                ensure!(dir.join("activate").is_file(), "{} holds no LED-class vibrator", dir.display());
+                eprintln!("haptics {}: clicks as a timed buzz", dir.display());
+                Motor::Led { dir }
             }
-            (None, Some(file)) => {
-                let hz = resonance(file)?;
-                eprintln!("haptics {}: clicks made for a motor swinging at {hz} Hz", path.display());
-                Click::Made(made(hz))
+            None => {
+                let (path, dev) = motor()?;
+                let click = match (cfg.click, &cfg.resonance) {
+                    (Some(id), _) => {
+                        eprintln!("haptics {}: clicks with waveform {id}", path.display());
+                        Click::Kept(id)
+                    }
+                    (None, Some(file)) => {
+                        let hz = resonance(file)?;
+                        eprintln!("haptics {}: clicks made for a motor swinging at {hz} Hz", path.display());
+                        Click::Made(made(hz))
+                    }
+                    (None, None) => unreachable!("the configuration names a click of one kind"),
+                };
+                Motor::Effect { dev, click }
             }
-            (None, None) => unreachable!("the configuration names a click of one kind"),
         };
-        Ok(Haptics { dev, click, strength: cfg.strength, playing: Arc::new(Mutex::new(None)), clicks: 0 })
+        Ok(Haptics { motor, strength: cfg.strength, playing: Arc::new(Mutex::new(None)), clicks: 0 })
     }
 
     /// One short click at the strength the slider's `position` gives, after
     /// taking away one still playing. Gives how long it plays.
     pub fn click(&mut self, position: f32) -> Result<Duration> {
-        let mut playing = self.playing.lock().expect("no thread panics while it holds the click playing");
-        if let Some((slot, _)) = playing.take() {
-            erase(&self.dev, slot).context("take away the click still playing")?;
+        let share = share(&self.strength, position);
+        match &mut self.motor {
+            Motor::Led { dir } => buzz(dir, share),
+            Motor::Effect { dev, click } => effect_click(dev, click, share, &mut self.clicks, &self.playing),
         }
-        let loaded = upload(&self.dev, &self.click, share(&self.strength, position)).context("load the click")?;
-        play(&mut self.dev, loaded.slot).context("play the click")?;
-        self.clicks += 1;
-        let this = (loaded.slot, self.clicks);
-        *playing = Some(this);
-        drop(playing);
-        let dev = self.dev.try_clone().context("share the motor")?;
-        let (playing, length) = (self.playing.clone(), loaded.length);
-        std::thread::spawn(move || {
-            std::thread::sleep(length);
-            let mut playing = playing.lock().expect("no thread panics while it holds the click playing");
-            if *playing == Some(this) {
-                *playing = None;
-                if let Err(e) = erase(&dev, this.0) {
-                    eprintln!("take away the click: {e}");
-                }
-            }
-        });
-        Ok(length)
     }
+}
+
+/// Buzz an LED-class vibrator at `share` of its gain for a click's length.
+fn buzz(dir: &std::path::Path, share: f32) -> Result<Duration> {
+    let gain = (share.clamp(0.0, 1.0) * LED_GAIN_TOP).round().clamp(1.0, LED_GAIN_TOP) as u32;
+    let write = |name: &str, value: &str| -> Result<()> {
+        let path = dir.join(name);
+        fs::write(&path, value).with_context(|| format!("write {}", path.display()))
+    };
+    write("duration", &BUZZ_MS.to_string())?;
+    write("gain", &gain.to_string())?;
+    write("activate", "1")?;
+    Ok(Duration::from_millis(u64::from(BUZZ_MS)))
+}
+
+/// The force-feedback click, loaded into the effect device as it is played.
+fn effect_click(
+    dev: &mut File,
+    click: &Click,
+    share: f32,
+    clicks: &mut u64,
+    playing: &Arc<Mutex<Option<(i16, u64)>>>,
+) -> Result<Duration> {
+    let mut playing_now = playing.lock().expect("no thread panics while it holds the click playing");
+    if let Some((slot, _)) = playing_now.take() {
+        erase(dev, slot).context("take away the click still playing")?;
+    }
+    let loaded = upload(dev, click, share).context("load the click")?;
+    play(dev, loaded.slot).context("play the click")?;
+    *clicks += 1;
+    let this = (loaded.slot, *clicks);
+    *playing_now = Some(this);
+    drop(playing_now);
+    let dev = dev.try_clone().context("share the motor")?;
+    let (playing, length) = (Arc::clone(playing), loaded.length);
+    std::thread::spawn(move || {
+        std::thread::sleep(length);
+        let mut playing = playing.lock().expect("no thread panics while it holds the click playing");
+        if *playing == Some(this) {
+            *playing = None;
+            if let Err(e) = erase(&dev, this.0) {
+                eprintln!("take away the click: {e}");
+            }
+        }
+    });
+    Ok(length)
 }
 
 /// Play the configured click once at the slider's `position`, saying how
