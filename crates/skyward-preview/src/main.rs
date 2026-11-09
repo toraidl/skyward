@@ -13,7 +13,7 @@ use skyward_ui::app::{
     MountFailure, MountRow, Part, PartKind, PartStop, Pick, Place, Screen, Source, TermEnd, Touch, UsbDrive, UsbLink, SCREEN_OFF,
 };
 use skyward_ui::widgets::{self, Bar, Bolt, Cap, Layer};
-use skyward_ui::{editor, fmt, pages, Canvas, Ctx, Fonts, Lang, Theme};
+use skyward_ui::{editor, fmt, pages, Canvas, Ctx, Fonts, Lang, Style, Theme};
 use skyward_vab::{BootSlots, FailureCode, Hold, Slot, SnapshotState, Standing};
 use std::fs::File;
 use std::io::BufWriter;
@@ -27,9 +27,16 @@ const CLOCK: &str = "23:46";
 /// The language the pages are drawn in, as `--lang` names its locale;
 /// simplified Chinese where it names none.
 static LANG: OnceLock<Lang> = OnceLock::new();
+/// The design language the preview draws in; ColorOS unless `--style`
+/// names the other.
+static STYLE: OnceLock<Style> = OnceLock::new();
 
 fn lang() -> Lang {
     *LANG.get().expect("the language is chosen before any page is drawn")
+}
+
+fn style() -> Style {
+    *STYLE.get().expect("the style is chosen before any page is drawn")
 }
 
 /// What a shell in the recovery writes for a few commands, colours and all.
@@ -119,6 +126,18 @@ fn main() -> Result<()> {
         None => Lang::Hans,
     };
     LANG.set(lang).expect("the language is chosen once");
+    let design = match args.iter().position(|a| a == "--style") {
+        Some(k) => match args.get(k + 1).map(String::as_str) {
+            Some("coloros") => Style::ColorOs,
+            Some("hyperos") => Style::HyperOs,
+            Some(other) => return Err(anyhow!("--style names coloros or hyperos, not {other}")),
+            None => return Err(anyhow!("--style needs a name")),
+        },
+        // The pages are being moved to ColorOS 17, so that is what the
+        // preview shows unless asked otherwise.
+        None => Style::ColorOs,
+    };
+    STYLE.set(design).expect("the style is chosen once");
 
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let font_path = font_path()?;
@@ -135,7 +154,7 @@ fn main() -> Result<()> {
     let cfg = DeviceConfig::load(config)?;
     let (w, h) = (cfg.display.width, cfg.display.height);
     let ppd = cfg.display.density as f32 / 160.0;
-    let light = Theme::light(w, h, ppd);
+    let light = Theme::styled(design, false, w, h, ppd);
 
     match args.get(2).map(String::as_str) {
         Some("--calibrate") => {
@@ -152,6 +171,33 @@ fn main() -> Result<()> {
     }
 
     let info = nezha(&cfg);
+    if let Some(k) = args.iter().position(|a| a == "--screen") {
+        // One page as the panel shows it, header and all: the whole-page
+        // shots leave the bar out, so this is how a page is checked against
+        // a screenshot of the stock system.
+        let name = args.get(k + 1).ok_or_else(|| anyhow!("--screen needs a page"))?;
+        let screen = match name.as_str() {
+            "home" => Screen::Home,
+            "settings" => Screen::Settings,
+            "about" => Screen::About,
+            "specs" => Screen::Specs,
+            "wipe" => Screen::Wipe,
+            "reboot" => Screen::Reboot,
+            "wlan" => Screen::Wlan,
+            other => return Err(anyhow!("--screen does not know {other}")),
+        };
+        let mut app = opened(screen, w, h, ppd);
+        app.set_screen_corners(cfg.display.corner_radius as f32);
+        app.set_status_bar_left_inset(cfg.display.status_bar_left_inset as f32);
+        // The About page's field is made on the first tick.
+        app.tick(0);
+        let mut canvas = Canvas::new(w, h);
+        app.compose(&mut canvas, &fonts, &info, CLOCK, 0);
+        let path = out.join(format!("screen-{name}.png"));
+        write_png(&path, &canvas)?;
+        println!("wrote {}", path.display());
+        return Ok(());
+    }
     if args.iter().any(|a| a == "--home") {
         let mut info = info;
         if !cfg.device.model.is_empty() {
@@ -191,6 +237,7 @@ fn main() -> Result<()> {
     for (name, screen, dark, info, data, pattern) in shots {
         let mut app = App::new(screen, w, h, ppd);
         app.state.lang = lang;
+        app.state.style = style();
         app.state.dark = dark;
         app.state.data = data;
         app.state.pattern = pattern.to_vec();
@@ -1052,6 +1099,7 @@ fn main() -> Result<()> {
     for (name, dark) in [("188-home-notices-light", false), ("189-home-notices-dark", true)] {
         let mut app = App::new(Screen::Home, w, h, ppd);
         app.state.lang = lang;
+        app.state.style = style();
         app.state.dark = dark;
         app.set_boot_slots(Ok(BootSlots { next_known: true, active: Slot::A, bootable: [true, true], successful: [true, true] }));
         let path = out.join(format!("{name}.png"));
@@ -1393,6 +1441,7 @@ fn online(app: &mut App) {
 fn opened(screen: Screen, w: u32, h: u32, ppd: f32) -> App {
     let mut app = App::new(screen, w, h, ppd);
     app.state.lang = lang();
+    app.state.style = style();
     app.state.data = Data::Open;
     app
 }

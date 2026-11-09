@@ -6,7 +6,7 @@ use crate::geom::Rect;
 use crate::icons::{self, Icon};
 use crate::lang::Lang;
 use crate::sprite::Sprite;
-use crate::theme::Theme;
+use crate::theme::{Style, Theme};
 use std::f32::consts::FRAC_PI_4;
 
 /// Where a drawn card ends and where each of its rows lies, for hit testing.
@@ -749,6 +749,16 @@ fn blur_room(t: &Theme) -> f32 {
 /// while the page scrolls; it sits where the page starts and scrolls with
 /// it.
 pub fn big_title(t: &Theme, f: &Fonts, title: &str) -> Sprite {
+    big_title_with(t, f, title, true)
+}
+
+/// The large title of a page that does (`back`) or does not open with the
+/// back control. ColorOS sets a root page's title at the page's margin and
+/// a step larger, since no disc stands beside it.
+pub fn big_title_with(t: &Theme, f: &Fonts, title: &str, back: bool) -> Sprite {
+    if t.style == Style::ColorOs {
+        return header_title(t, f, title, back);
+    }
     let m = &t.m;
     let pad = blur_room(t);
     let room = m.w as f32 - m.title_x * 2.0;
@@ -770,6 +780,12 @@ pub fn big_title(t: &Theme, f: &Fonts, title: &str) -> Sprite {
 /// The page title centred in the bar over a scrolled page, as ink that
 /// fades and sharpens in.
 pub fn small_title(t: &Theme, f: &Fonts, title: &str) -> Sprite {
+    // ColorOS keeps the title in the header the whole way; the pinned one
+    // is the same mark in the same place, so scrolling past the large one
+    // changes nothing.
+    if t.style == Style::ColorOs {
+        return header_title(t, f, title, true);
+    }
     let m = &t.m;
     let (px, pad) = (m.account_title_px, blur_room(t));
     let room = m.w as f32 - m.title_x * 2.0;
@@ -783,6 +799,26 @@ pub fn small_title(t: &Theme, f: &Fonts, title: &str) -> Sprite {
     let (x, y) = ((m.w as f32 - w) / 2.0 - pad, m.back_cy - h / 2.0 - pad);
     Sprite::capture(x, y, (w + pad * 2.0).ceil() as u32, (h + pad * 2.0).ceil() as u32, |c, dx, dy| {
         c.text_center(&f.heading, title, m.w as f32 / 2.0 + dx, m.back_cy + dy, px, Rgba::rgb(0, 0, 0));
+    })
+}
+
+/// The title as ColorOS sets it: beside the round back button, at the
+/// header's centre line, not standing over the page.
+fn header_title(t: &Theme, f: &Fonts, title: &str, back: bool) -> Sprite {
+    let m = &t.m;
+    let pad = blur_room(t);
+    let x = if back { m.title_x } else { m.margin };
+    let room = (m.w as f32 - x - m.margin).max(0.0);
+    let mut px = if back { m.title_px } else { m.title_px * 1.2 };
+    let mut w = Canvas::new(0, 0).text_width(&f.heading, title, px);
+    if w > room && room > 0.0 {
+        px = (px * room / w).max(m.title_px * 0.6);
+        w = Canvas::new(0, 0).text_width(&f.heading, title, px);
+    }
+    let h = px * 1.4;
+    let (x, y) = (x - pad, m.back_cy - h / 2.0 - pad);
+    Sprite::capture(x, y, (w + pad * 2.0).ceil() as u32, (h + pad * 2.0).ceil() as u32, |c, dx, dy| {
+        c.text_vc(&f.heading, title, x + pad + dx, m.back_cy + dy, px, Rgba::rgb(0, 0, 0), None);
     })
 }
 
@@ -893,6 +929,11 @@ fn ramp(stops: &[(f32, f32)], f: f32) -> f32 {
 /// The centre and radius of the round chip behind `<`.
 pub fn back_disc(t: &Theme) -> (f32, f32, f32) {
     let m = &t.m;
+    if t.style == Style::ColorOs {
+        // A 37 dp disc standing at the page's margin, its centre on the
+        // same line as the title beside it.
+        return (m.margin + m.dp(19.7), m.back_cy, m.dp(18.7));
+    }
     (m.back_x + m.back_w / 2.0 + m.dp(1.55), m.back_cy, m.dp(21.7))
 }
 
@@ -906,7 +947,20 @@ pub fn back_chip(t: &Theme) -> (Canvas, i32, i32) {
 /// Such a chip about the disc centred at (`cx`, `cy`) of radius `r`.
 fn chip(t: &Theme, (cx, cy, r): (f32, f32, f32)) -> (Canvas, i32, i32) {
     let m = &t.m;
-    let (fill, rim) = if t.dark { (Rgba::rgb(38, 38, 38), Rgba::rgb(62, 62, 62)) } else { (Rgba::rgb(248, 248, 248), Rgba::rgb(255, 255, 255)) };
+    let coloros = t.style == Style::ColorOs;
+    let (fill, rim) = if coloros {
+        // ColorOS's disc is plain white, or the card's grey in the dark,
+        // with nothing drawn round it.
+        if t.dark {
+            (Rgba::rgb(44, 44, 46), Rgba::rgb(44, 44, 46))
+        } else {
+            (Rgba::rgb(255, 255, 255), Rgba::rgb(255, 255, 255))
+        }
+    } else if t.dark {
+        (Rgba::rgb(38, 38, 38), Rgba::rgb(62, 62, 62))
+    } else {
+        (Rgba::rgb(248, 248, 248), Rgba::rgb(255, 255, 255))
+    };
     let spread = m.dp(7.0);
     let reach = r + spread;
     let (x0, y0) = ((cx - reach).floor() as i32 - 1, (cy - reach).floor() as i32 - 1);
@@ -918,13 +972,15 @@ fn chip(t: &Theme, (cx, cy, r): (f32, f32, f32)) -> (Canvas, i32, i32) {
             let d = (px as f32 + 0.5 - cx).hypot(py as f32 + 0.5 - cy) - r;
             if d > 0.0 && d < spread {
                 let k = 1.0 - d / spread;
-                c.blend(px, py, Rgba::rgb(0, 0, 0), 0.04 * k * k);
+                c.blend(px, py, Rgba::rgb(0, 0, 0), if coloros { 0.02 } else { 0.04 } * k * k);
             }
         }
     }
     c.fill_circle(cx, cy, r, fill);
-    let rim_w = m.dp(0.8);
-    c.stroke_circle(cx, cy, r - rim_w / 2.0, rim_w, rim);
+    if !coloros {
+        let rim_w = m.dp(0.8);
+        c.stroke_circle(cx, cy, r - rim_w / 2.0, rim_w, rim);
+    }
     (c, x0, y0)
 }
 
@@ -1461,7 +1517,10 @@ fn draw_row(c: &mut Canvas, t: &Theme, f: &Fonts, r: &Row, lay: &Layout, top: f3
     let right = m.w as f32 - m.margin;
     let cy = top + lay.h / 2.0;
     if let Some((color, icon)) = r.icon {
-        icons::tile(c, t, card_x + m.inner, cy - m.icon / 2.0, color, icon);
+        // ColorOS draws the icon itself in the row's ink; the colours the
+        // HyperOS tiles are filled with only pick the tile there.
+        let ink = if t.style == Style::ColorOs { r.tint.unwrap_or(tone.text) } else { color };
+        icons::tile(c, t, card_x + m.inner, cy - m.icon / 2.0, ink, icon);
     }
     if let Some(level) = r.fan {
         wlan_fan(c, card_x + m.dp(FAN_CX), cy, m.dp(FAN_R), level, tone.text, tone.faint);
@@ -1675,10 +1734,19 @@ pub fn list_toned(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, rows: &[Row], 
     c.fill_round_rect(m.margin, top, w, h, m.card_radius, tone.card);
     let mut y = top;
     let mut rects = Vec::new();
-    for (r, l) in rows.iter().zip(&lays) {
+    let count = rows.len();
+    for (i, (r, l)) in rows.iter().zip(&lays).enumerate() {
         draw_row(c, t, f, r, l, y, tone);
         rects.push(Rect::new(m.margin, y, w, l.h));
         y += l.h;
+        // ColorOS parts two rows of a card with a hairline that starts
+        // where the row's words do and stops short of the card's edge.
+        if t.style == Style::ColorOs && i + 1 < count {
+            let hair = m.dp(0.34).max(1.0);
+            let x0 = m.margin + l.text_x;
+            let x1 = m.w as f32 - m.margin - m.inner;
+            c.fill_rect(x0, y - hair / 2.0, (x1 - x0).max(0.0), hair, t.pal.divider);
+        }
     }
     Block { bottom: top + h, rows: rects }
 }
@@ -1710,10 +1778,17 @@ pub fn device_card(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, title: &str, 
     let tone = Tone::page(t);
     let mut rects = vec![Rect::new(card_x, top, right - card_x, m.account_row_h)];
     let mut y = top + m.account_row_h;
-    for (r, l) in rows.iter().zip(&lays) {
+    let count = rows.len();
+    for (i, (r, l)) in rows.iter().zip(&lays).enumerate() {
         draw_row(c, t, f, r, l, y, &tone);
         rects.push(Rect::new(card_x, y, right - card_x, l.h));
         y += l.h;
+        if t.style == Style::ColorOs && i + 1 < count {
+            let hair = m.dp(0.34).max(1.0);
+            let x0 = card_x + l.text_x;
+            let x1 = right - m.inner;
+            c.fill_rect(x0, y - hair / 2.0, (x1 - x0).max(0.0), hair, t.pal.divider);
+        }
     }
     Block { bottom: top + h, rows: rects }
 }
@@ -2463,7 +2538,8 @@ pub fn theme_picker(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, top: f32) -> 
     let m = &t.m;
     let gap = m.dp(4.0);
     let slot_w = (m.w as f32 - m.margin * 2.0 - gap) / 2.0;
-    let (ring, inset) = (m.dp(3.0), m.dp(6.0));
+    let coloros = t.style == Style::ColorOs;
+    let (ring, inset) = if coloros { (m.dp(2.0), m.dp(4.0)) } else { (m.dp(3.0), m.dp(6.0)) };
     let tile = slot_w - inset * 2.0;
     let label_px = m.dp(15.9);
     let (ink_top, ink_bottom) = f.heading.ink(label_px);
@@ -2475,7 +2551,7 @@ pub fn theme_picker(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, top: f32) -> 
         let sx = m.margin + (slot_w + gap) * i as f32;
         let on = t.dark == dark;
         if on {
-            let r = m.dp(26.0) - ring / 2.0;
+            let r = if coloros { m.dp(18.0) } else { m.dp(26.0) } - ring / 2.0;
             c.stroke_round_rect(sx + ring / 2.0, top + ring / 2.0, slot_w - ring, slot_w - ring, r, ring, t.pal.accent);
         }
         theme_tile(c, t, sx + inset, top + inset, tile, tile, dark);
@@ -2666,9 +2742,20 @@ pub fn keyboard(c: &mut Canvas, t: &Theme, f: &Fonts, l: Lang, top: f32, layer: 
 /// Miniature settings page: a blue backdrop with two cards of placeholder
 /// lines, light cards for the light theme and dark ones for the dark theme.
 fn theme_tile(c: &mut Canvas, t: &Theme, x: f32, y: f32, w: f32, h: f32, dark: bool) {
-    let (top, bottom) = (Rgba::rgb(77, 113, 246), Rgba::rgb(115, 184, 249));
+    let (top, bottom) = if t.style == Style::ColorOs {
+        // The blue-violet of ColorOS's own wallpapers rather than HyperOS's
+        // sky blue.
+        if dark {
+            (Rgba::rgb(30, 32, 52), Rgba::rgb(74, 64, 124))
+        } else {
+            (Rgba::rgb(48, 70, 148), Rgba::rgb(146, 118, 216))
+        }
+    } else {
+        (Rgba::rgb(77, 113, 246), Rgba::rgb(115, 184, 249))
+    };
     let grad = |py: f32| mix(top, bottom, (py - y) / h);
-    c.fill_round_rect_graded(x, y, w, h, t.m.dp(20.0), &grad);
+    let radius = if t.style == Style::ColorOs { t.m.dp(16.0) } else { t.m.dp(20.0) };
+    c.fill_round_rect_graded(x, y, w, h, radius, &grad);
     let card = if dark { Rgba::rgb(0, 0, 0).with_alpha(51) } else { Rgba::rgb(255, 255, 255).with_alpha(51) };
     let lw = h * 0.027;
     for (c0, c1) in [(0.218f32, 0.472f32), (0.523, 0.779)] {
@@ -3043,5 +3130,70 @@ mod tests {
         let broken = lines.iter().position(|l| l.ends_with("com.android.art/")).expect("the long path breaks after a slash");
         assert!(lines[broken].starts_with("/data/misc/"), "the path starts its own line: {lines:?}");
         assert!(lines[broken + 1].starts_with("dalvik-cache"), "and goes on with what follows the slash: {lines:?}");
+    }
+
+    /// The colour of the pixel at (`x`, `y`) of `c`.
+    fn at(c: &Canvas, x: f32, y: f32) -> [u8; 4] {
+        let i = ((y as u32 * c.w + x as u32) * 4) as usize;
+        c.data[i..i + 4].try_into().unwrap()
+    }
+
+    #[test]
+    fn a_coloros_card_parts_its_rows_with_a_hairline_where_their_words_start() {
+        let t = Theme::coloros_light(1080, 2412, 3.0);
+        let f = crate::font::bundled();
+        let mut c = Canvas::filled(1080, 2412, t.pal.bg);
+        let block = list(
+            &mut c,
+            &t,
+            &f,
+            300.0,
+            &[Row::new("手机名称").trail(Trail::Value("OPPO Find X3")), Row::new("存储空间").trail(Trail::Value("81.8 GB"))],
+        );
+        let y = block.rows[1].y - 1.0;
+        let line = t.pal.divider;
+        let x = t.m.margin + t.m.inner + t.m.dp(8.0);
+        assert_eq!(at(&c, x, y), [line.r, line.g, line.b, 255], "the hairline runs under the words");
+        assert_eq!(at(&c, t.m.margin + t.m.dp(2.0), y), [255, 255, 255, 255], "and stops short of the card's edge");
+        // HyperOS leaves the same card whole.
+        let h = Theme::light(1080, 2412, 3.0);
+        let mut c = Canvas::filled(1080, 2412, h.pal.bg);
+        let block = list(&mut c, &h, &f, 300.0, &[Row::new("A"), Row::new("B")]);
+        assert_eq!(at(&c, x, block.rows[1].y - 1.0), [255, 255, 255, 255], "HyperOS draws no line");
+    }
+
+    #[test]
+    fn a_coloros_row_draws_its_icon_in_ink_with_no_tile_behind_it() {
+        let t = Theme::coloros_light(1080, 2412, 3.0);
+        let f = crate::font::bundled();
+        let mut c = Canvas::filled(1080, 2412, t.pal.bg);
+        let block = list(&mut c, &t, &f, 300.0, &[Row::new("语言").icon(Rgba::rgb(0, 128, 255), Icon::Globe)]);
+        // The corner of the icon's box is bare card, not a blue tile.
+        let (ix, iy) = (t.m.margin + t.m.inner, block.rows[0].y + t.m.row_h / 2.0 - t.m.icon / 2.0);
+        assert_eq!(at(&c, ix + 1.0, iy + 1.0), [255, 255, 255, 255], "no tile");
+        // The glyph itself is there, in the row's ink.
+        let mut drawn = 0;
+        for y in iy as u32..(iy + t.m.icon) as u32 {
+            for x in ix as u32..(ix + t.m.icon) as u32 {
+                if at(&c, x as f32, y as f32)[0] < 200 {
+                    drawn += 1;
+                }
+            }
+        }
+        assert!(drawn > 0, "the glyph is drawn");
+    }
+
+    #[test]
+    fn a_coloros_page_sets_its_title_beside_the_round_back_button() {
+        let t = Theme::coloros_light(1080, 2412, 3.0);
+        let f = crate::font::bundled();
+        let (cx, cy, r) = back_disc(&t);
+        assert!((r - t.m.dp(18.7)).abs() < 0.01 && (cx - t.m.dp(35.7)).abs() < 0.01, "disc {cx} {r}");
+        let title = big_title(&t, &f, "设置");
+        assert!(t.m.title_x > cx + r, "the title clears the disc: {} vs {}", t.m.title_x, cx + r);
+        assert!((title.y + title.h as f32 / 2.0 - cy).abs() < t.m.dp(14.0), "and sits on its line");
+        // A page with no back control puts its title at the page's margin.
+        let root = big_title_with(&t, &f, "Skyward", false);
+        assert!(root.x < title.x, "the root title starts at the margin: {} vs {}", root.x, title.x);
     }
 }

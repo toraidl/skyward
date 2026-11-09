@@ -370,10 +370,15 @@ pub fn glyph(c: &mut Canvas, icon: Icon, cx: f32, cy: f32, size: f32, ink: Rgba)
 }
 
 /// Draw `icon` as a row shows it: its tile in `color`, the tile's top-left
-/// corner at (`x`, `y`), and its glyph in white over it.
+/// corner at (`x`, `y`), and its glyph in white over it. ColorOS has no
+/// tinted tiles; there the row draws the bare glyph in `color` instead.
 pub fn tile(c: &mut Canvas, t: &Theme, x: f32, y: f32, color: Rgba, icon: Icon) {
     let s = t.m.icon;
     let (cx, cy) = (x + s / 2.0, y + s / 2.0);
+    if t.style == crate::theme::Style::ColorOs {
+        glyph(c, icon, cx, cy, s, color);
+        return;
+    }
     draw(c, Art::Tile, cx, cy, s, color);
     glyph(c, icon, cx, cy, s, Rgba::rgb(255, 255, 255));
 }

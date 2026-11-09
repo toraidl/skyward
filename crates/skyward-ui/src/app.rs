@@ -14,7 +14,7 @@ use crate::pages::{self, Band, Ctx};
 use crate::sprite::{Blurs, Sprite};
 use crate::search;
 use crate::term::{self, Term, TermKey};
-use crate::theme::Theme;
+use crate::theme::{Style, Theme};
 use crate::tr;
 use crate::widgets::{self, Bar, Bolt, Cap, Layer, WlanMark};
 use skyward_info::DeviceInfo;
@@ -1478,6 +1478,8 @@ impl Frame {
 pub struct State {
     /// The language the pages speak.
     pub lang: Lang,
+    /// The design language the pages are drawn in.
+    pub style: Style,
     pub dark: bool,
     pub brightness: f32,
     /// How long the screen stays on with nothing touched, by its place in
@@ -1638,6 +1640,7 @@ impl Default for State {
     fn default() -> Self {
         State {
             lang: Lang::Hans,
+            style: Style::HyperOs,
             dark: false,
             brightness: SLIDER_START,
             // Two minutes.
@@ -2428,7 +2431,7 @@ pub struct App {
     /// The current page's large and bar titles, for their words and the
     /// theme, with their blurred versions as they are needed. A page can
     /// change its title in place, as work on files does once it ends.
-    titles: Option<((&'static str, bool), Blurs, Blurs)>,
+    titles: Option<((&'static str, bool, bool), Blurs, Blurs)>,
     /// The icon and words of the current page's folding search bar, for
     /// its words and the theme.
     search_words: Option<((&'static str, bool), Canvas)>,
@@ -2603,11 +2606,7 @@ impl App {
     }
 
     pub fn theme(&self) -> Theme {
-        let mut theme = if self.state.dark {
-            Theme::dark(self.w, self.h, self.px_per_dp)
-        } else {
-            Theme::light(self.w, self.h, self.px_per_dp)
-        };
+        let mut theme = Theme::styled(self.state.style, self.state.dark, self.w, self.h, self.px_per_dp);
         theme.m.status_x = theme.m.status_x.max(self.status_left_inset);
         theme
     }
@@ -3892,9 +3891,14 @@ impl App {
             self.toast = None;
         }
         let title = self.frame.as_ref().expect("rendered above").title;
-        let key = (title, self.state.dark);
+        let back = self.frame.as_ref().is_some_and(|fr| fr.back);
+        let key = (title, self.state.dark, back);
         if self.titles.as_ref().is_none_or(|(k, _, _)| *k != key) {
-            self.titles = Some((key, Blurs::new(widgets::big_title(&t, f, title)), Blurs::new(widgets::small_title(&t, f, title))));
+            self.titles = Some((
+                key,
+                Blurs::new(widgets::big_title_with(&t, f, title, back)),
+                Blurs::new(widgets::small_title(&t, f, title)),
+            ));
         }
         if let Some(fold) = self.frame.as_ref().and_then(|fr| fr.fold) {
             let key = (fold.hint, self.state.dark);
@@ -4135,7 +4139,9 @@ impl App {
         }
         if frame.back {
             let (_, chip, x, y) = self.chip.as_ref().expect("a page's `<` is drawn with it");
-            out.lay(chip, *x, *y, bar);
+            // HyperOS lets the disc in with the bar; ColorOS keeps its
+            // white disc on the page from the start.
+            out.lay(chip, *x, *y, if t.style == Style::ColorOs { 1.0 } else { bar });
             if pressing == Some(Action::Back) {
                 widgets::back_held(out, t);
             } else {
@@ -10307,7 +10313,7 @@ mod tests {
         app.compose(&mut c, &f, &i, "12:00", 0);
         app.file_job_ended(JobEnd::Stopped, 0);
         app.compose(&mut c, &f, &i, "12:00", 16);
-        assert_eq!(app.titles.as_ref().map(|((title, _), _, _)| *title), Some("复制未完成"));
+        assert_eq!(app.titles.as_ref().map(|((title, _, _), _, _)| *title), Some("复制未完成"));
     }
 
     #[test]

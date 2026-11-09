@@ -1,6 +1,18 @@
 use crate::color::{over, Rgba};
 use crate::glow::{self, Glow};
 
+/// The design language a theme is drawn in. The pages themselves say what
+/// they hold; this says how it is set: where the title sits, how round the
+/// cards are, and which inks the stock system would use.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Style {
+    /// Xiaomi's HyperOS, which the pages were first measured against.
+    #[default]
+    HyperOs,
+    /// OPPO's ColorOS 17, measured on a Find X3 (PEDM00).
+    ColorOs,
+}
+
 #[derive(Clone, Copy)]
 pub struct Palette {
     pub bg: Rgba,
@@ -48,6 +60,9 @@ pub struct Palette {
     /// the shadow is whole.
     pub popup: Rgba,
     pub shadow: Rgba,
+    /// The hairline between two rows of one card. HyperOS keeps its rows
+    /// apart by nothing at all; ColorOS draws this line, inset to the words.
+    pub divider: Rgba,
 }
 
 /// The status bar battery's inks, partly see-through as the stock status
@@ -153,16 +168,48 @@ pub struct Theme {
     pub hero: Hero,
     pub m: Metrics,
     pub dark: bool,
+    pub style: Style,
 }
 
 impl Theme {
     /// `px_per_dp` is the panel density over 160, e.g. 3.0 at 480 dpi.
     pub fn light(w: u32, h: u32, px_per_dp: f32) -> Self {
-        Theme { pal: LIGHT, hero: LIGHT_HERO, m: metrics(w, h, px_per_dp), dark: false }
+        Theme { pal: LIGHT, hero: LIGHT_HERO, m: metrics(w, h, px_per_dp), dark: false, style: Style::HyperOs }
     }
 
     pub fn dark(w: u32, h: u32, px_per_dp: f32) -> Self {
-        Theme { pal: DARK, hero: DARK_HERO, m: metrics(w, h, px_per_dp), dark: true }
+        Theme { pal: DARK, hero: DARK_HERO, m: metrics(w, h, px_per_dp), dark: true, style: Style::HyperOs }
+    }
+
+    /// The ColorOS 17 look, sampled from a Find X3's stock settings.
+    pub fn coloros_light(w: u32, h: u32, px_per_dp: f32) -> Self {
+        Theme {
+            pal: COLOROS_LIGHT,
+            hero: COLOROS_LIGHT_HERO,
+            m: coloros_metrics(w, h, px_per_dp),
+            dark: false,
+            style: Style::ColorOs,
+        }
+    }
+
+    pub fn coloros_dark(w: u32, h: u32, px_per_dp: f32) -> Self {
+        Theme {
+            pal: COLOROS_DARK,
+            hero: COLOROS_DARK_HERO,
+            m: coloros_metrics(w, h, px_per_dp),
+            dark: true,
+            style: Style::ColorOs,
+        }
+    }
+
+    /// The theme of `style` in the given mode.
+    pub fn styled(style: Style, dark: bool, w: u32, h: u32, px_per_dp: f32) -> Self {
+        match (style, dark) {
+            (Style::HyperOs, false) => Theme::light(w, h, px_per_dp),
+            (Style::HyperOs, true) => Theme::dark(w, h, px_per_dp),
+            (Style::ColorOs, false) => Theme::coloros_light(w, h, px_per_dp),
+            (Style::ColorOs, true) => Theme::coloros_dark(w, h, px_per_dp),
+        }
     }
 
     /// This theme with every card as it shows behind a row held down.
@@ -280,6 +327,7 @@ const LIGHT: Palette = Palette {
     updown: Rgba::rgb(214, 214, 214),
     popup: Rgba::rgb(255, 255, 255),
     shadow: Rgba::rgb(0, 0, 0).with_alpha(27),
+    divider: Rgba::rgb(229, 229, 229),
 };
 
 const DARK: Palette = Palette {
@@ -331,7 +379,76 @@ const DARK: Palette = Palette {
     updown: Rgba::rgb(54, 54, 54),
     popup: Rgba::rgb(41, 41, 41),
     shadow: Rgba::rgb(0, 0, 0).with_alpha(77),
+    divider: Rgba::rgb(46, 46, 46),
 };
+
+/// Layout measured on a Find X3's ColorOS 17 settings, in dp, at the
+/// panel's 480 dpi. The page margin is 16 dp, the cards sit 16 dp apart,
+/// a row is 58 dp tall, and the title rides in the header beside a 37 dp
+/// round back button instead of standing over the page.
+fn coloros_metrics(w: u32, h: u32, px_per_dp: f32) -> Metrics {
+    let dp = |v: f32| v * px_per_dp;
+    Metrics {
+        w,
+        h,
+        px_per_dp,
+        margin: dp(16.0),
+        // The stock cards are continuous-curvature squircles; a round
+        // corner of this radius reads the same at this size.
+        card_radius: dp(28.0),
+        card_gap: dp(16.0),
+        section_block: dp(48.6),
+        section_label_top: dp(27.0),
+        row_h: dp(58.0),
+        row_pad_v: dp(18.0),
+        inner: dp(16.0),
+        icon: dp(24.0),
+        icon_gap: dp(14.7),
+        title_px: dp(20.0),
+        // The title starts after the 37 dp disc that holds the back arrow.
+        title_x: dp(66.3),
+        title_top: dp(50.5),
+        // The stock arrow is a wide, shallow chevron centred in a white
+        // disc 37 dp across, its centre 35.8 dp in from the page's edge.
+        back_x: dp(26.0),
+        back_cy: dp(57.8),
+        back_w: dp(19.4),
+        back_h: dp(16.2),
+        back_stroke: dp(1.7),
+        stroke: dp(2.0),
+        content_top: dp(96.0),
+        search_h: dp(40.0),
+        search_text_inset: dp(40.0),
+        after_search: dp(16.0),
+        row_title_px: dp(17.0),
+        sub_px: dp(14.0),
+        sub_gap: dp(4.0),
+        sub_pitch: dp(19.0),
+        label_px: dp(13.0),
+        account_title_px: dp(20.0),
+        account_row_h: dp(72.0),
+        avatar: dp(40.0),
+        avatar_inset: dp(16.0),
+        badge_px: dp(12.0),
+        badge_w: dp(56.0),
+        badge_h: dp(24.0),
+        chevron_w: dp(6.5),
+        chevron_h: dp(12.0),
+        chevron_inset: dp(16.0),
+        chevron_stroke: dp(1.6),
+        value_gap: dp(8.0),
+        switch_w: dp(44.0),
+        switch_h: dp(26.0),
+        knob: dp(20.0),
+        slider_h: dp(24.0),
+        slider_knob: dp(18.0),
+        status_x: dp(37.0),
+        status_right: dp(40.0),
+        status_bolt_right: dp(36.0),
+        status_cy: dp(20.0),
+        status_px: dp(14.0),
+    }
+}
 
 // Sampled from the stock「我的设备」page: in light mode the cards are
 // the ordinary settings cards; in dark mode they are white at low opacity
@@ -352,4 +469,112 @@ const DARK_HERO: Hero = Hero {
     title: Rgba::rgb(244, 245, 248),
     value: Rgba::rgb(157, 161, 188),
     chevron: Rgba::rgb(118, 122, 160),
+};
+
+// Sampled from a Find X3 running ColorOS 17: a cool grey page, pure white
+// cards with far rounder corners than HyperOS draws, ink rather than tinted
+// icon tiles, and the stock blue of its switches. The hairline is the
+// 1 px #e0e0e0 line between two rows of a card, inset to the words.
+const COLOROS_LIGHT: Palette = Palette {
+    bg: Rgba::rgb(240, 241, 242),
+    card: Rgba::rgb(255, 255, 255),
+    text: Rgba::rgb(25, 25, 25),
+    subtitle: Rgba::rgb(110, 111, 111),
+    value: Rgba::rgb(153, 153, 153),
+    section: Rgba::rgb(110, 111, 111),
+    chevron: Rgba::rgb(179, 179, 179),
+    // The switch's fill, sampled at #0080ff.
+    accent: Rgba::rgb(0, 128, 255),
+    track: Rgba::rgb(233, 234, 235),
+    switch_off: Rgba::rgb(229, 229, 229),
+    search: Rgba::rgb(255, 255, 255),
+    search_icon: Rgba::rgb(153, 153, 153),
+    placeholder: Rgba::rgb(0, 0, 0).with_alpha(64),
+    badge: Rgba::rgb(240, 241, 242),
+    avatar: Rgba::rgb(232, 234, 236),
+    avatar_glyph: Rgba::rgb(255, 255, 255),
+    status: Rgba::rgb(25, 25, 25),
+    battery: BatteryInk {
+        charging: Rgba::rgb(29, 205, 58),
+        low: Rgba::rgb(245, 62, 55),
+        level: Rgba::rgb(0, 0, 0).with_alpha(196),
+        empty: Rgba::rgb(0, 0, 0).with_alpha(77),
+        bolt: Rgba::rgb(0, 0, 0).with_alpha(172),
+    },
+    mono_icon: Rgba::rgb(160, 160, 160),
+    danger: Rgba::rgb(245, 62, 55),
+    danger_soft: Rgba::rgb(253, 235, 233),
+    info: Rgba::rgb(25, 25, 25),
+    // ColorOS rows carry bare line icons in the text's own ink.
+    outline: Rgba::rgb(25, 25, 25),
+    spec_label: Rgba::rgb(153, 153, 153),
+    row_press: Rgba::rgb(0, 0, 0).with_alpha(17),
+    button_press: Rgba::rgb(0, 0, 0).with_alpha(17),
+    round: Rgba::rgb(240, 241, 242),
+    round_mark: Rgba::rgb(120, 120, 120),
+    updown: Rgba::rgb(179, 179, 179),
+    popup: Rgba::rgb(255, 255, 255),
+    shadow: Rgba::rgb(0, 0, 0).with_alpha(40),
+    divider: Rgba::rgb(224, 224, 224),
+};
+
+// The same design in the dark, where ColorOS lifts its cards only a little
+// from a near-black page.
+const COLOROS_DARK: Palette = Palette {
+    bg: Rgba::rgb(15, 15, 16),
+    card: Rgba::rgb(28, 28, 30),
+    text: Rgba::rgb(233, 233, 233),
+    subtitle: Rgba::rgb(150, 150, 150),
+    value: Rgba::rgb(128, 128, 128),
+    section: Rgba::rgb(140, 140, 140),
+    chevron: Rgba::rgb(90, 90, 90),
+    accent: Rgba::rgb(51, 153, 255),
+    track: Rgba::rgb(44, 44, 46),
+    switch_off: Rgba::rgb(58, 58, 60),
+    search: Rgba::rgb(28, 28, 30),
+    search_icon: Rgba::rgb(128, 128, 128),
+    placeholder: Rgba::rgb(255, 255, 255).with_alpha(77),
+    badge: Rgba::rgb(40, 40, 42),
+    avatar: Rgba::rgb(51, 51, 53),
+    avatar_glyph: Rgba::rgb(150, 150, 150),
+    status: Rgba::rgb(233, 233, 233),
+    battery: BatteryInk {
+        charging: Rgba::rgb(29, 205, 58),
+        low: Rgba::rgb(230, 75, 59),
+        level: Rgba::rgb(255, 255, 255).with_alpha(232),
+        empty: Rgba::rgb(255, 255, 255).with_alpha(94),
+        bolt: Rgba::rgb(255, 255, 255).with_alpha(207),
+    },
+    mono_icon: Rgba::rgb(120, 120, 120),
+    danger: Rgba::rgb(255, 92, 84),
+    danger_soft: Rgba::rgb(52, 24, 24),
+    info: Rgba::rgb(233, 233, 233),
+    outline: Rgba::rgb(233, 233, 233),
+    spec_label: Rgba::rgb(128, 128, 128),
+    row_press: Rgba::rgb(255, 255, 255).with_alpha(20),
+    button_press: Rgba::rgb(255, 255, 255).with_alpha(20),
+    round: Rgba::rgb(44, 44, 46),
+    round_mark: Rgba::rgb(160, 160, 160),
+    updown: Rgba::rgb(90, 90, 90),
+    popup: Rgba::rgb(38, 38, 40),
+    shadow: Rgba::rgb(0, 0, 0).with_alpha(90),
+    divider: Rgba::rgb(44, 44, 46),
+};
+
+const COLOROS_LIGHT_HERO: Hero = Hero {
+    glow: &glow::LIGHT,
+    version: Rgba::rgb(0, 0, 0).with_alpha(153),
+    card: COLOROS_LIGHT.card,
+    title: COLOROS_LIGHT.text,
+    value: COLOROS_LIGHT.value,
+    chevron: COLOROS_LIGHT.chevron,
+};
+
+const COLOROS_DARK_HERO: Hero = Hero {
+    glow: &glow::DARK,
+    version: Rgba::rgb(255, 255, 255).with_alpha(153),
+    card: COLOROS_DARK.card,
+    title: COLOROS_DARK.text,
+    value: COLOROS_DARK.value,
+    chevron: COLOROS_DARK.chevron,
 };
