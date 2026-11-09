@@ -19,9 +19,16 @@ use skyward_binder::{service, status};
 pub const SERVICE: &str = "android.hardware.boot.IBootControl/default";
 const INTERFACE: &str = "android.hardware.boot.IBootControl";
 
+/// The older kind, by each version a phone may register, and whether that
+/// version can say which slot starts next: `getActiveBootSlot` came with
+/// 1.2. Each of its methods is called by the name of the version it came
+/// with, which the service checks.
+const HARDWARE_SERVICES: [(&str, bool); 3] = [
+    ("android.hardware.boot@1.2::IBootControl", true),
+    ("android.hardware.boot@1.1::IBootControl", false),
+    ("android.hardware.boot@1.0::IBootControl", false),
+];
 /// The older kind, by the version that also tells which slot starts next.
-/// Each of its methods is called by the name of the version it came with,
-/// which the service checks.
 pub const HARDWARE_SERVICE: &str = "android.hardware.boot@1.2::IBootControl";
 const FIRST: &str = "android.hardware.boot@1.0::IBootControl";
 /// The version that tells the bootloader where an update stands.
@@ -52,7 +59,7 @@ const YES: i32 = 1;
 /// The phone's boot control, as this program talks to it.
 pub enum BootControl<'a> {
     Newer(Handle<'a>),
-    Older(Handle<'a>),
+    Older(Handle<'a>, bool),
 }
 
 /// The slot the bootloader starts next, as the running boot control tells
@@ -97,19 +104,37 @@ impl<'a> BootControl<'a> {
     /// otherwise. Say so where it is not running.
     pub fn open(binder: &'a Binder, hardware: &'a Binder) -> Result<BootControl<'a>> {
         let not_running = |name: &str| format!("{name} is not running; the phone's boot control has to be started first");
-        if service::declared(binder, SERVICE)? {
+        let described = service::declared(binder, SERVICE);
+        if matches!(described, Ok(true)) {
             let control = service::find(binder, SERVICE)?.with_context(|| not_running(SERVICE))?;
             return Ok(BootControl::Newer(control));
         }
-        let control = hidl::find(hardware, HARDWARE_SERVICE, INSTANCE)?.with_context(|| not_running(HARDWARE_SERVICE))?;
-        Ok(BootControl::Older(control))
+        // A stock recovery's service directory may not accept the newer
+        // declaration query: this phone answers one with a binder error.
+        // That must not hide a registered HIDL boot control, which is the
+        // only kind it has.
+        let mut legacy = None;
+        for (name, says_next) in HARDWARE_SERVICES {
+            if let Some(control) = hidl::find(hardware, name, INSTANCE)? {
+                legacy = Some((name, says_next, control));
+                break;
+            }
+        }
+        match legacy {
+            Some((_, says_next, control)) => Ok(BootControl::Older(control, says_next)),
+            None => match described {
+                Err(e) => Err(e.context(format!("no {HARDWARE_SERVICE}/{INSTANCE} fallback is registered"))),
+                _ => bail!(not_running(HARDWARE_SERVICE)),
+            },
+        }
     }
 
     /// The slot the bootloader starts next.
     pub fn active(&self) -> Result<Slot> {
         let number = match self {
             BootControl::Newer(c) => newer(c, GET_ACTIVE, |_| {}, |r| r.i32()),
-            BootControl::Older(c) => older(c, HARDWARE_SERVICE, ACTIVE, |_| {}, |r| r.i32()),
+            BootControl::Older(c, true) => older(c, HARDWARE_SERVICE, ACTIVE, |_| {}, |r| r.i32()),
+            BootControl::Older(_, false) => bail!("this phone's boot control cannot say which slot starts next: getActiveBootSlot came with the 1.2 interface"),
         }
         .context("ask which slot starts next")?;
         match number {
@@ -133,14 +158,14 @@ impl<'a> BootControl<'a> {
     fn bootable(&self, slot: Slot) -> Result<bool> {
         match self {
             BootControl::Newer(c) => newer(c, IS_BOOTABLE, |p| p.i32(slot.number() as i32), |r| r.bool()),
-            BootControl::Older(c) => older(c, FIRST, BOOTABLE, |m| m.u32(slot.number()), answered),
+            BootControl::Older(c, _) => older(c, FIRST, BOOTABLE, |m| m.u32(slot.number()), answered),
         }
     }
 
     fn successful(&self, slot: Slot) -> Result<bool> {
         match self {
             BootControl::Newer(c) => newer(c, IS_SUCCESSFUL, |p| p.i32(slot.number() as i32), |r| r.bool()),
-            BootControl::Older(c) => older(c, FIRST, SUCCESSFUL, |m| m.u32(slot.number()), answered),
+            BootControl::Older(c, _) => older(c, FIRST, SUCCESSFUL, |m| m.u32(slot.number()), answered),
         }
     }
 
@@ -148,7 +173,7 @@ impl<'a> BootControl<'a> {
     pub fn merge_status(&self) -> Result<MergeStatus> {
         let said = match self {
             BootControl::Newer(c) => newer(c, GET_MERGE_STATUS, |_| {}, |r| r.i32()),
-            BootControl::Older(c) => older(c, MERGE, MERGE_STATUS, |_| {}, |r| r.i32()),
+            BootControl::Older(c, _) => older(c, MERGE, MERGE_STATUS, |_| {}, |r| r.i32()),
         }
         .context("ask where an update stands")?;
         Ok(match said {
@@ -166,7 +191,7 @@ impl<'a> BootControl<'a> {
         let what = || format!("tell the bootloader an update stands at {status:?}");
         let done = match self {
             BootControl::Newer(c) => newer(c, SET_SNAPSHOT_MERGE_STATUS, |p| p.i32(status as i32), |_| Ok(true)),
-            BootControl::Older(c) => older(c, MERGE, SET_MERGE_STATUS, |m| m.u32(status as u32), |r| r.bool()),
+            BootControl::Older(c, _) => older(c, MERGE, SET_MERGE_STATUS, |m| m.u32(status as u32), |r| r.bool()),
         }
         .with_context(what)?;
         if !done {
@@ -181,7 +206,7 @@ impl<'a> BootControl<'a> {
         let what = || format!("have slot {} start next", slot.letter());
         match self {
             BootControl::Newer(c) => newer(c, SET_ACTIVE_SLOT, |p| p.i32(slot.number() as i32), |_| Ok(())).with_context(what),
-            BootControl::Older(c) => {
+            BootControl::Older(c, _) => {
                 // The answer is whether it worked, and why not in text it
                 // points at.
                 let why = older(c, FIRST, SET_ACTIVE, |m| m.u32(slot.number()), |r| {
