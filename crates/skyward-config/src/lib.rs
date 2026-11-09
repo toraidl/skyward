@@ -310,6 +310,11 @@ pub struct Display {
     /// leaving room for a camera cutout on the left. Zero keeps the default.
     #[serde(default)]
     pub status_bar_left_inset: u32,
+    /// The brightness the pages start at, from 0 to 1, for a panel that is
+    /// too dim at the recovery's own starting level. None keeps the
+    /// recovery's default until the user moves the slider.
+    #[serde(default)]
+    pub brightness: Option<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

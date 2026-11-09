@@ -232,6 +232,7 @@ impl Transfer {
             let description = skyward_ui::fmt::storage_name(lang).into();
             let storage = offer.then(|| skyward_mtp::Storage { top: PathBuf::from(skyward_crypto::data::SDCARD), description });
             self.service.offer(storage)?;
+            skyward_sys::kmsg(&format!("file transfer: internal storage offered: {offer}"))?;
             self.offered = offer;
         }
         Ok(())
@@ -259,6 +260,101 @@ fn withhold(transfer: &mut Option<Transfer>, app: &mut App, now: u64) -> Result<
             Ok(false)
         }
     }
+}
+
+/// Where the choices the pages keep across a reboot are written: on the
+/// persist partition beside the network the recovery remembers.
+const CHOICES: &str = "/mnt/vendor/persist/skyward/settings.conf";
+
+/// How long a choice must go unchanged before it is written, so dragging a
+/// slider does not write the flash on every frame.
+const WRITE_CHOICES_AFTER: Duration = Duration::from_millis(300);
+
+/// The choices the pages keep across a reboot, one `key=value` a line, in
+/// the order they are read back.
+fn choices_text(s: &skyward_ui::app::State) -> String {
+    let lang = match s.lang {
+        Lang::Hans => "zh-CN",
+        Lang::Hant => "zh-TW",
+        Lang::En => "en",
+    };
+    format!(
+        "lang={lang}\ndark={}\nbrightness={:.4}\nscreen_off={}\ntime_zone={}\nvibrate={}\nvibration={:.4}\nfile_transfer={}\n",
+        u8::from(s.dark),
+        s.brightness,
+        s.screen_off,
+        s.time_zone,
+        u8::from(s.vibrate),
+        s.vibration,
+        u8::from(s.file_transfer),
+    )
+}
+
+/// Put back the choices [`choices_text`] wrote, if any: a phone that has
+/// none keeps the ones it started with.
+fn read_choices(state: &mut skyward_ui::app::State) -> Result<()> {
+    read_choices_at(Path::new(CHOICES), state)
+}
+
+/// [`read_choices`] from `path`, which is where the tests put them.
+fn read_choices_at(path: &Path, state: &mut skyward_ui::app::State) -> Result<()> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e).with_context(|| format!("read {}", path.display())),
+    };
+    for line in text.lines() {
+        let Some((key, value)) = line.split_once('=') else { continue };
+        let flag = value == "1";
+        match key {
+            "lang" => {
+                if let Ok(lang) = Lang::for_locale(value) {
+                    state.lang = lang;
+                }
+            }
+            "dark" => state.dark = flag,
+            "brightness" => {
+                if let Ok(level) = value.parse::<f32>() {
+                    state.brightness = level.clamp(0.0, 1.0);
+                }
+            }
+            "screen_off" => {
+                if let Ok(place) = value.parse::<usize>() {
+                    state.screen_off = place.min(skyward_ui::app::SCREEN_OFF.len().saturating_sub(1));
+                }
+            }
+            "time_zone" => {
+                if let Ok(place) = value.parse::<usize>() {
+                    state.time_zone = place;
+                }
+            }
+            "vibrate" => state.vibrate = flag,
+            "vibration" => {
+                if let Ok(level) = value.parse::<f32>() {
+                    state.vibration = level.clamp(0.0, 1.0);
+                }
+            }
+            "file_transfer" => state.file_transfer = flag,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+/// Write the choices where the next boot reads them, all at once so a phone
+/// that loses power mid-write keeps the ones it had.
+fn write_choices(text: &str) -> Result<()> {
+    write_choices_at(Path::new(CHOICES), text)
+}
+
+/// [`write_choices`] to `path`, which is where the tests put them.
+fn write_choices_at(path: &Path, text: &str) -> Result<()> {
+    let dir = path.parent().context("the choices have no folder")?;
+    fs::create_dir_all(dir).with_context(|| format!("make {}", dir.display()))?;
+    let next = path.with_extension("conf.new");
+    fs::write(&next, text).with_context(|| format!("write {}", next.display()))?;
+    fs::rename(&next, path).with_context(|| format!("put {} in place", path.display()))?;
+    Ok(())
 }
 
 /// Whether the phone's fastbootd runs, as init tells it, and how far a
@@ -1086,6 +1182,14 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
         app.set_boot_slots(read_slots());
     }
     app.set_asked(asked(&request));
+    // A panel the recovery's own starting level leaves too dim starts where
+    // its device file says, and then wherever the user last left it.
+    if let Some(level) = cfg.display.brightness {
+        app.state.brightness = level.clamp(0.0, 1.0);
+    }
+    if let Err(e) = read_choices(&mut app.state) {
+        skyward_sys::kmsg(&format!("the saved settings were not read: {e:#}"))?;
+    }
     // Opening the data partition, or a user's own files in it, under way,
     // and the users whose own files are still closed once it is open.
     let mut decryptor: Option<Decryptor> = None;
@@ -1284,6 +1388,11 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     let mut plugged: Option<Plugged> = None;
     let mut seen: Option<String> = None;
     let mut drive_at = Instant::now();
+    // The choices as the phone last wrote them, to tell when one changed.
+    let mut saved_choices = choices_text(&app.state);
+    // A change not yet written, and when it was last seen, so a slider
+    // being dragged writes once when the hand stops.
+    let mut pending_choices: Option<(String, Instant)> = None;
     loop {
         let now = monotonic_ms();
         if leave_at.is_some_and(|at| now >= at) {
@@ -2303,6 +2412,29 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
             };
             skyward_sys::kmsg(&format!("file transfer stops: {why:#}"))?;
             app.file_transfer_failed(false, &skyward_ui::fmt::transfer_stopped(app.state.lang, &format!("{why:#}")), now);
+        }
+        // A choice the user changed is written for the next boot, once the
+        // hand has stopped: a slider dragged across the screen changes
+        // every frame, and the flash should not be written that often. A
+        // write that fails is told in the kernel log and tried again.
+        let choices = choices_text(&app.state);
+        if choices != saved_choices {
+            let since = match &pending_choices {
+                Some((text, at)) if *text == choices => *at,
+                _ => {
+                    pending_choices = Some((choices.clone(), Instant::now()));
+                    Instant::now()
+                }
+            };
+            if since.elapsed() >= WRITE_CHOICES_AFTER {
+                match write_choices(&choices) {
+                    Ok(()) => {
+                        saved_choices = choices;
+                        pending_choices = None;
+                    }
+                    Err(e) => skyward_sys::kmsg(&format!("the settings were not saved: {e:#}"))?,
+                }
+            }
         }
     }
 }

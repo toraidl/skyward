@@ -22,6 +22,10 @@ corner_radius = 100
 # Android reports the top-left cutout's bounds as x=0..165, y=0..103.
 # Leave another 24 physical pixels between that region and the clock.
 status_bar_left_inset = 189
+# The panel's driver reaches its normal maximum at level 2047 of 4095 and
+# this panel is too dim at the recovery's own starting level, a tenth of
+# the slider. Start where the user found it comfortable: 886 of 2047.
+brightness = 0.43
 
 # QCA6390 is built into the recovery kernel. Stage firmware before telling
 # CNSS that the filesystem is ready; never borrow a module from another build.
