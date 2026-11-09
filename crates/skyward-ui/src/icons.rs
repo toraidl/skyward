@@ -68,6 +68,9 @@ pub enum Icon {
 /// The stock icons' box: every outline here is laid out in it.
 const BOX: f32 = 28.0;
 
+/// ColorOS 17's own icons, from its Settings, are laid out in a 24-unit box.
+const COUI_BOX: f32 = 24.0;
+
 /// How a part of a glyph is drawn.
 #[derive(Clone, Copy)]
 enum Shape {
@@ -86,14 +89,22 @@ enum Shape {
 struct Part {
     shape: Shape,
     cut: bool,
+    /// What share of the ink this part takes. The stock glyphs layer a
+    /// lighter fill under a solid one, as a lock's shackle is drawn.
+    alpha: f32,
 }
 
 const fn add(shape: Shape) -> Part {
-    Part { shape, cut: false }
+    Part { shape, cut: false, alpha: 1.0 }
 }
 
 const fn cut(shape: Shape) -> Part {
-    Part { shape, cut: true }
+    Part { shape, cut: true, alpha: 1.0 }
+}
+
+/// A part laid over the others at `alpha` of the ink.
+const fn faint(shape: Shape, alpha: f32) -> Part {
+    Part { shape, cut: false, alpha }
 }
 
 /// The stock tile, which every one of the stock Settings' icons is drawn
@@ -336,6 +347,151 @@ const BATTERY: &[Part] = &[add(Shape::EvenOdd(
      C22.747,11.536 22.613,11.536 22.345,11.536C22.077,11.536 21.943,11.536 21.838,11.583C21.719,11.637 21.624,11.732 21.571,11.851Z",
 ))];
 
+// ColorOS 17's own icons, taken from its Settings and laid out in a 24-unit
+// box. They are OPPO's material: the internal ColorOS build carries them, a
+// public build draws the shared glyphs above instead.
+
+const CO_PHONE: &[Part] = &[
+    // The screen, a little lighter than the body's outline.
+    faint(Shape::Fill(
+        "M7.7902,2.3906H16.2122A1.3,1.3 0,0 1,17.5122,3.6906V20.3015A1.3,1.3 0,0 1,16.2122,21.6015H7.7902\
+         A1.3,1.3 0,0 1,6.4902,20.3015V3.6906A1.3,1.3 0,0 1,7.7902,2.3906Z",
+    ), 0.2),
+    add(Shape::Line(
+        "M8.4,2H15.6A2.4,2.4 0,0 1,18,4.4V19.6A2.4,2.4 0,0 1,15.6,22H8.4A2.4,2.4 0,0 1,6,19.6V4.4A2.4,2.4 0,0 1,8.4,2Z",
+        1.7,
+    )),
+    add(Shape::Line("M10,19H14", 1.7)),
+];
+
+const CO_SETTING: &[Part] = &[faint(Shape::EvenOdd(
+    "M10.435 1.414C10.946 1.339 11.469 1.3 12 1.3C12.531 1.3 13.054 1.339 13.565 1.414C14.054 1.485 14.427 1.85 14.54 2.303\
+     L14.808 3.378C14.959 3.985 15.442 4.516 16.107 4.901C16.767 5.284 17.457 5.431 18.061 5.258L19.126 4.952C19.575 4.823 20.076 4.964 20.383 5.35\
+     C21.031 6.165 21.562 7.078 21.952 8.062C22.134 8.521 22.005 9.026 21.669 9.351L20.87 10.121C20.419 10.557 20.2 11.235 20.2 12\
+     C20.2 12.765 20.419 13.443 20.87 13.879L21.669 14.649C22.005 14.974 22.134 15.479 21.952 15.938C21.562 16.922 21.031 17.835 20.383 18.65\
+     C20.076 19.036 19.575 19.177 19.126 19.048L18.061 18.742C17.457 18.569 16.767 18.716 16.107 19.099C15.442 19.484 14.959 20.015 14.808 20.622\
+     L14.54 21.697C14.427 22.15 14.054 22.515 13.565 22.586C13.054 22.661 12.531 22.7 12 22.7C11.469 22.7 10.946 22.661 10.435 22.586\
+     C9.946 22.515 9.573 22.15 9.46 21.697L9.192 20.622C9.041 20.015 8.558 19.484 7.893 19.099C7.233 18.716 6.543 18.569 5.939 18.742\
+     L4.874 19.048C4.425 19.177 3.923 19.036 3.617 18.65C2.969 17.835 2.438 16.922 2.048 15.938C1.866 15.479 1.995 14.974 2.331 14.649\
+     L3.13 13.878C3.581 13.443 3.8 12.765 3.8 12C3.8 11.235 3.581 10.557 3.13 10.122L2.331 9.351C1.995 9.026 1.866 8.521 2.048 8.062\
+     C2.438 7.078 2.969 6.165 3.617 5.35C3.923 4.964 4.425 4.823 4.874 4.952L5.939 5.258C6.543 5.431 7.233 5.284 7.893 4.901\
+     C8.558 4.516 9.041 3.985 9.192 3.378L9.46 2.303C9.573 1.85 9.946 1.485 10.435 1.414Z\
+     M12 8.7C10.177 8.7 8.7 10.177 8.7 12C8.7 13.823 10.177 15.3 12 15.3C13.823 15.3 15.3 13.823 15.3 12C15.3 10.177 13.823 8.7 12 8.7Z",
+), 0.902)];
+
+const CO_MORE: &[Part] = &[faint(Shape::Fill(
+    "M12,13.75C12.967,13.75 13.75,12.966 13.75,12C13.75,11.033 12.967,10.25 12,10.25C11.033,10.25 10.25,11.033 10.25,12\
+     C10.25,12.966 11.033,13.75 12,13.75Z\
+     M12,6.625C12.967,6.625 13.75,5.842 13.75,4.875C13.75,3.908 12.967,3.125 12,3.125C11.033,3.125 10.25,3.908 10.25,4.875\
+     C10.25,5.842 11.033,6.625 12,6.625Z\
+     M12,20.875C12.967,20.875 13.75,20.091 13.75,19.125C13.75,18.158 12.967,17.375 12,17.375C11.033,17.375 10.25,18.158 10.25,19.125\
+     C10.25,20.091 11.033,20.875 12,20.875Z",
+), 0.902)];
+
+const CO_LOCK: &[Part] = &[
+    add(Shape::Fill(
+        "M17.27,11.778C18.137,11.778 18.572,11.778 18.903,11.947C19.195,12.095 19.433,12.333 19.581,12.625\
+         C19.75,12.956 19.75,13.391 19.75,14.258V17.535C19.75,19.395 19.75,20.325 19.388,21.036C19.069,21.66 18.561,22.168 17.937,22.487\
+         C17.226,22.849 16.296,22.849 14.436,22.849H9.564C7.704,22.849 6.774,22.849 6.063,22.487C5.439,22.168 4.931,21.66 4.612,21.036\
+         C4.25,20.325 4.25,19.395 4.25,17.535L4.25,14.258C4.25,13.391 4.25,12.956 4.419,12.625C4.568,12.333 4.805,12.095 5.097,11.947\
+         C5.428,11.778 5.863,11.778 6.73,11.778L17.27,11.778Z",
+    )),
+    // The shackle sits lighter than the body, as the stock lock draws it.
+    faint(Shape::Fill(
+        "M12.004,1.258C14.879,1.258 17.211,3.589 17.211,6.465V10.008C17.211,10.375 16.913,10.672 16.546,10.672H15.875\
+         C15.508,10.672 15.211,10.375 15.211,10.008V6.465C15.211,4.694 13.775,3.258 12.004,3.258C10.233,3.258 8.797,4.694 8.797,6.465V10.008\
+         C8.797,10.375 8.499,10.672 8.132,10.672H7.461C7.094,10.672 6.797,10.375 6.797,10.008V6.465C6.797,3.589 9.128,1.258 12.004,1.258Z",
+    ), 0.4),
+];
+
+const CO_SHIELD: &[Part] = &[add(Shape::Fill(
+    "M11.478,1.217C11.824,1.167 12.176,1.167 12.521,1.217C12.931,1.276 13.318,1.428 13.818,1.616L13.819,1.615L13.837,1.621L19.155,3.616\
+     C19.87,3.884 20.481,4.096 20.944,4.504C21.324,4.839 21.616,5.261 21.796,5.734C22.015,6.31 22,6.957 22,7.721V10.97\
+     C22,13.916 21.153,16.269 19.651,18.152C18.164,20.015 16.088,21.353 13.73,22.38C13.325,22.557 12.994,22.707 12.556,22.78\
+     C12.222,22.835 11.778,22.835 11.443,22.78C11.006,22.707 10.675,22.557 10.269,22.38C7.911,21.353 5.835,20.015 4.348,18.152\
+     C2.847,16.269 2,13.916 2,10.97V7.721C2,6.958 1.985,6.31 2.204,5.734C2.384,5.261 2.676,4.839 3.055,4.504C3.518,4.096 4.13,3.884 4.844,3.616\
+     L10.163,1.621C10.672,1.43 11.064,1.277 11.478,1.217Z\
+     M16.788,8.396C16.422,8.03 15.828,8.03 15.462,8.396L10.923,12.935C10.835,13.022 10.693,13.022 10.605,12.935L8.538,10.868\
+     C8.172,10.502 7.578,10.502 7.212,10.868C6.846,11.235 6.846,11.828 7.212,12.194L10.1,15.082C10.466,15.448 11.06,15.448 11.427,15.082\
+     L16.788,9.722C17.154,9.356 17.154,8.762 16.788,8.396Z",
+))];
+
+const CO_WIFI: &[Part] = &[add(Shape::Fill(
+    "M11.9981,17.335C12.5507,17.335 13.077,17.449 13.5538,17.6553C13.7969,17.7604 13.9186,17.8135 14.0167,17.959\
+     C14.0904,18.0686 14.1322,18.2633 14.1104,18.3936C14.0813,18.5664 13.9687,18.6912 13.7432,18.9404L12.714,20.0781\
+     C12.4673,20.3508 12.3444,20.4877 12.1993,20.5381C12.0719,20.5823 11.9332,20.5823 11.8057,20.5381C11.6606,20.4877 11.5368,20.3509 11.2901,20.0781\
+     L10.2589,18.9385C10.0328,18.6886 9.9196,18.563 9.8907,18.3896C9.8691,18.2593 9.9115,18.0646 9.9854,17.9551\
+     C10.0839,17.8095 10.2065,17.7572 10.4503,17.6523C10.9253,17.4481 11.4484,17.335 11.9981,17.335Z\
+     M12.4386,12.7051C13.916,12.7801 15.2948,13.2297 16.4815,13.9609C16.8141,14.1658 16.9803,14.2691 17.0821,14.459\
+     C17.1634,14.6107 17.195,14.8346 17.1593,15.0029C17.1145,15.2136 16.9641,15.3811 16.6622,15.7148L16.5567,15.8311\
+     C16.2734,16.1443 16.1314,16.3009 15.9864,16.3691C15.8381,16.439 15.7396,16.4567 15.5763,16.4424C15.4166,16.4284 15.1831,16.3059 14.7169,16.0615\
+     C13.9042,15.6356 12.9792,15.3947 11.9981,15.3945C11.0183,15.3946 10.0935,15.6347 9.2813,16.0596C8.8156,16.3032 8.5825,16.4256 8.4229,16.4395\
+     C8.2598,16.4536 8.1611,16.436 8.0128,16.3662C7.8679,16.2979 7.7266,16.141 7.4434,15.8281L7.339,15.7119\
+     C7.0367,15.3779 6.8847,15.2109 6.8399,15C6.8043,14.8316 6.8367,14.6078 6.9181,14.4561C7.0201,14.2661 7.1865,14.1629 7.5196,13.958\
+     C8.8226,13.1567 10.3565,12.6944 11.9981,12.6943Z\
+     M12.339,8.0586C15.0546,8.1275 17.5653,9.0183 19.6348,10.4893C19.9702,10.7276 20.1382,10.8465 20.2276,11.0332\
+     C20.3015,11.1875 20.3241,11.3939 20.2852,11.5605C20.2382,11.7621 20.0868,11.9294 19.7843,12.2637L19.6856,12.373\
+     C19.3926,12.6969 19.2458,12.8589 19.086,12.9277C18.9335,12.9935 18.8026,13.0095 18.6388,12.9824C18.4671,12.9539 18.2629,12.8164 17.8556,12.542\
+     C16.1822,11.4147 14.1674,10.755 11.9981,10.7549C9.8301,10.7549 7.8155,11.4123 6.1427,12.5381C5.7354,12.8121 5.532,12.95 5.3604,12.9785\
+     C5.1965,13.0057 5.0648,12.9896 4.9122,12.9238C4.7526,12.8549 4.6063,12.6926 4.3136,12.3691L4.214,12.2588\
+     C3.9113,11.9244 3.76,11.7573 3.713,11.5557C3.6742,11.389 3.6967,11.1826 3.7706,11.0283C3.8601,10.8417 4.0278,10.7225 4.3634,10.4844\
+     C6.5189,8.9545 9.1537,8.0547 11.9981,8.0547Z\
+     M12.4591,3.4209C16.3274,3.5191 19.8893,4.849 22.7686,7.0322C23.104,7.2865 23.2718,7.4139 23.3556,7.5986C23.4258,7.7539 23.4445,7.9516 23.4044,8.1172\
+     C23.3564,8.3146 23.2049,8.4821 22.9024,8.8164L22.8067,8.9229C22.5111,9.2495 22.3629,9.4125 22.1973,9.4814C22.0431,9.5456 21.8994,9.5606 21.7354,9.5283\
+     C21.5595,9.4936 21.3671,9.3513 20.9825,9.0674C18.4692,7.2124 15.3616,6.1154 11.9981,6.1152C8.6363,6.1153 5.5303,7.2111 3.0177,9.0645\
+     C2.6327,9.3484 2.4398,9.4908 2.2638,9.5254C2.0999,9.5576 1.9561,9.5427 1.8018,9.4785C1.6363,9.4095 1.4881,9.2458 1.1925,8.9189\
+     L1.0968,8.8125C0.7946,8.4784 0.6428,8.3115 0.5948,8.1143C0.5546,7.9487 0.5734,7.751 0.6436,7.5957C0.7274,7.4107 0.8957,7.2828 1.2315,7.0283\
+     C4.2241,4.7608 7.954,3.4151 11.9981,3.415Z",
+))];
+
+const CO_BATTERY: &[Part] = &[
+    add(Shape::Fill(
+        "M17,8C17.773,8 18.4,8.627 18.4,9.4V14.6C18.4,15.373 17.773,16 17,16H4.101C3.327,16 2.7,15.373 2.7,14.6V9.4C2.7,8.627 3.327,8 4.101,8H17Z",
+    )),
+    add(Shape::Fill(
+        "M15.598,5.3C16.426,5.3 17.09,5.299 17.625,5.343C18.168,5.387 18.641,5.481 19.077,5.703C19.773,6.058 20.34,6.624 20.694,7.32\
+         C20.916,7.756 21.009,8.229 21.054,8.772C21.097,9.308 21.098,9.971 21.098,10.8V13.2C21.098,14.029 21.097,14.692 21.054,15.227\
+         C21.009,15.771 20.916,16.244 20.694,16.68C20.34,17.376 19.773,17.942 19.077,18.297C18.641,18.519 18.168,18.613 17.625,18.657\
+         C17.09,18.701 16.426,18.7 15.598,18.7H5.497C4.669,18.7 4.005,18.701 3.47,18.657C2.926,18.613 2.453,18.519 2.018,18.297\
+         C1.321,17.942 0.755,17.376 0.4,16.68C0.178,16.244 0.084,15.771 0.04,15.227C-0.004,14.692 -0.003,14.029 -0.003,13.2V10.8\
+         C-0.003,9.971 -0.004,9.308 0.04,8.772C0.084,8.229 0.178,7.756 0.4,7.32C0.755,6.624 1.321,6.058 2.018,5.703\
+         C2.453,5.481 2.926,5.387 3.47,5.343C4.005,5.299 4.669,5.3 5.497,5.3H15.598Z\
+         M18.441,6.951C18.236,6.846 17.967,6.776 17.511,6.738C17.046,6.7 16.449,6.7 15.598,6.7H5.497C4.646,6.7 4.049,6.7 3.584,6.738\
+         C3.127,6.776 2.859,6.846 2.653,6.951C2.221,7.172 1.869,7.523 1.648,7.956C1.544,8.162 1.473,8.43 1.436,8.887C1.398,9.352 1.397,9.948 1.397,10.8V13.2\
+         C1.397,14.052 1.398,14.648 1.436,15.113C1.473,15.57 1.544,15.838 1.648,16.044C1.869,16.477 2.221,16.828 2.653,17.049\
+         C2.859,17.153 3.127,17.224 3.584,17.262C4.049,17.3 4.646,17.3 5.497,17.3H15.598C16.449,17.3 17.046,17.3 17.511,17.262\
+         C17.967,17.224 18.236,17.154 18.441,17.049C18.874,16.828 19.226,16.476 19.446,16.044C19.551,15.838 19.622,15.57 19.659,15.113\
+         C19.697,14.648 19.697,14.052 19.697,13.2V10.8C19.697,9.948 19.697,9.352 19.659,8.887C19.622,8.43 19.551,8.162 19.446,7.956\
+         C19.226,7.523 18.874,7.172 18.441,6.951Z\
+         M23.303,9.2C23.689,9.2 24.003,9.514 24.003,9.9V14.101C24.003,14.487 23.689,14.8 23.303,14.8C22.916,14.8 22.604,14.487 22.604,14.101V9.9\
+         C22.604,9.514 22.916,9.2 23.303,9.2Z",
+    )),
+];
+
+/// ColorOS 17's own drawing of `icon`, when its Settings has one for the
+/// same job: the parts, the share of its box to fill, and the colour its
+/// palette gives them.
+fn coloros_icon(icon: Icon, dark: bool) -> Option<(&'static [Part], f32, Rgba)> {
+    // The stock icons carry a brand colour: the WLAN and the padlock blue,
+    // the shield and the battery green, the rest in the text's own ink.
+    let (blue, green) = if dark {
+        (Rgba::rgb(0x1A, 0x8C, 0xFF), Rgba::rgb(0x24, 0xB2, 0x32))
+    } else {
+        (Rgba::rgb(0x00, 0x80, 0xFF), Rgba::rgb(0x00, 0xBD, 0x13))
+    };
+    let ink = |day: Rgba, night: Rgba| if dark { night } else { day };
+    Some(match icon {
+        Icon::Phone => (CO_PHONE, 1.0, ink(Rgba::rgb(64, 64, 64), Rgba::rgb(170, 170, 170))),
+        Icon::Lock => (CO_LOCK, 1.0, blue),
+        Icon::More => (CO_MORE, 1.0, ink(Rgba::rgb(0, 0, 0), Rgba::rgb(255, 255, 255))),
+        Icon::Gear => (CO_SETTING, 1.0, ink(Rgba::rgb(0, 0, 0), Rgba::rgb(255, 255, 255))),
+        Icon::Shield => (CO_SHIELD, 1.0, green),
+        Icon::Wlan => (CO_WIFI, 1.0, blue),
+        Icon::Battery => (CO_BATTERY, 1.0, green),
+        _ => return None,
+    })
+}
+
 /// What `icon`'s glyph is drawn from, and at what share of its size.
 fn outline(icon: Icon) -> (&'static [Part], f32) {
     match icon {
@@ -369,6 +525,21 @@ pub fn glyph(c: &mut Canvas, icon: Icon, cx: f32, cy: f32, size: f32, ink: Rgba)
     draw(c, Art::Glyph(icon), cx, cy, size, ink);
 }
 
+/// `icon` as `t`'s design language draws it: ColorOS 17's own glyph where the
+/// build has one for this job, the shared one otherwise.
+pub fn glyph_for(c: &mut Canvas, t: &Theme, icon: Icon, cx: f32, cy: f32, size: f32, ink: Rgba) {
+    let art = match (t.style, coloros_icon(icon, t.dark)) {
+        (crate::theme::Style::ColorOs, Some(_)) => Art::ColorOs(icon, t.dark),
+        _ => Art::Glyph(icon),
+    };
+    draw(c, art, cx, cy, size, ink);
+}
+
+/// Whether `icon` is one ColorOS 17 has its own drawing of.
+pub fn has_coloros_icon(icon: Icon) -> bool {
+    coloros_icon(icon, false).is_some()
+}
+
 /// Draw `icon` as a row shows it: its tile in `color`, the tile's top-left
 /// corner at (`x`, `y`), and its glyph in white over it. ColorOS has no
 /// tinted tiles; there the row draws the bare glyph in `color` instead.
@@ -376,7 +547,7 @@ pub fn tile(c: &mut Canvas, t: &Theme, x: f32, y: f32, color: Rgba, icon: Icon) 
     let s = t.m.icon;
     let (cx, cy) = (x + s / 2.0, y + s / 2.0);
     if t.style == crate::theme::Style::ColorOs {
-        glyph(c, icon, cx, cy, s, color);
+        glyph_for(c, t, icon, cx, cy, s, color);
         return;
     }
     draw(c, Art::Tile, cx, cy, s, color);
@@ -388,6 +559,9 @@ pub fn tile(c: &mut Canvas, t: &Theme, x: f32, y: f32, color: Rgba, icon: Icon) 
 enum Art {
     Tile,
     Glyph(Icon),
+    /// ColorOS 17's own icon for the same thing, in its 24-unit box, in the
+    /// day or the night palette.
+    ColorOs(Icon, bool),
 }
 
 /// What a drawing covers of each pixel of its square box, from the top-left
@@ -413,6 +587,11 @@ static DRAWN: Mutex<Vec<Made>> = Mutex::new(Vec::new());
 /// the part of the canvas held is drawn, and nothing at all is made when
 /// none of it does.
 fn draw(c: &mut Canvas, art: Art, cx: f32, cy: f32, size: f32, ink: Rgba) {
+    // ColorOS's own icons carry their own colour, day or night.
+    let ink = match art {
+        Art::ColorOs(icon, dark) => coloros_icon(icon, dark).map(|(_, _, ink)| ink).unwrap_or(ink),
+        _ => ink,
+    };
     let (left, top) = ((cx - size / 2.0).round() as i32, (cy - size / 2.0).round() as i32);
     let side = size.ceil() as i32;
     let (rows, cols) = (c.held(), c.cols());
@@ -439,11 +618,18 @@ fn coverage(art: Art, size: f32) -> Arc<Coverage> {
     if let Some(cover) = found {
         return cover;
     }
-    let (parts, scale) = match art {
-        Art::Tile => (TILE, 1.0),
-        Art::Glyph(icon) => outline(icon),
+    let (parts, scale, unit) = match art {
+        Art::Tile => (TILE, 1.0, BOX),
+        Art::Glyph(icon) => {
+            let (parts, scale) = outline(icon);
+            (parts, scale, BOX)
+        }
+        Art::ColorOs(icon, dark) => {
+            let (parts, scale, _) = coloros_icon(icon, dark).expect("a ColorOS drawing has ColorOS parts");
+            (parts, scale, COUI_BOX)
+        }
     };
-    let cover = Arc::new(rasterize(parts, scale, size));
+    let cover = Arc::new(rasterize(parts, scale, unit, size));
     DRAWN.lock().expect("no one panics holding the drawings").push(Made { art, size, cover: cover.clone() });
     cover
 }
@@ -452,14 +638,14 @@ fn coverage(art: Art, size: f32) -> Arc<Coverage> {
 /// about the middle of the box they are laid out in. They are drawn
 /// together, so that what one part cuts out of another shows what lies
 /// under the whole.
-fn rasterize(parts: &[Part], scale: f32, size: f32) -> Coverage {
+fn rasterize(parts: &[Part], scale: f32, unit: f32, size: f32) -> Coverage {
     let side = size.ceil() as u32;
     let mut art = Pixmap::new(side, side).expect("a glyph's box holds pixels");
-    let k = size / BOX * scale;
-    let at = Transform::from_translate(size / 2.0, size / 2.0).pre_scale(k, k).pre_translate(-BOX / 2.0, -BOX / 2.0);
+    let k = size / unit * scale;
+    let at = Transform::from_translate(size / 2.0, size / 2.0).pre_scale(k, k).pre_translate(-unit / 2.0, -unit / 2.0);
     for part in parts {
         let mut paint = Paint::default();
-        paint.set_color(Color::WHITE);
+        paint.set_color(Color::from_rgba(1.0, 1.0, 1.0, part.alpha).unwrap_or(Color::WHITE));
         paint.blend_mode = if part.cut { BlendMode::Clear } else { BlendMode::SourceOver };
         match part.shape {
             Shape::Fill(d) => art.fill_path(&path(d), &paint, FillRule::Winding, at, None),

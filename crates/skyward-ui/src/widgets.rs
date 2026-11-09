@@ -677,6 +677,15 @@ fn arrow_at(c: &mut Canvas, t: &Theme, dx: f32, dy: f32, color: Rgba) {
     let m = &t.m;
     let (x, cy, w, h, sw) = (m.back_x + dx, m.back_cy + dy, m.back_w, m.back_h, m.back_stroke);
     let (tip, end) = (x + sw / 2.0, x + w - sw / 2.0);
+    if t.style == Style::ColorOs {
+        // ColorOS 17's back control: the head reaches 40% along a shaft that
+        // runs the box's full width, not the bare chevron HyperOS draws.
+        let head = x + w * 0.4;
+        c.line(tip, cy, head, cy - h / 2.0 + sw / 2.0, sw, color);
+        c.line(tip, cy, head, cy + h / 2.0 - sw / 2.0, sw, color);
+        c.line(tip, cy, end, cy, sw, color);
+        return;
+    }
     c.line(tip, cy, end, cy - h / 2.0 + sw / 2.0, sw, color);
     c.line(tip, cy, end, cy + h / 2.0 - sw / 2.0, sw, color);
 }
@@ -1775,9 +1784,15 @@ pub fn device_card(c: &mut Canvas, t: &Theme, f: &Fonts, top: f32, title: &str, 
     let av = m.avatar;
     let acx = card_x + m.avatar_inset + av / 2.0;
     c.fill_circle(acx, cy, av / 2.0, t.pal.avatar);
-    icons::glyph(c, Icon::Phone, acx, cy, av * 0.86, t.pal.avatar_glyph);
+    icons::glyph_for(c, t, Icon::Phone, acx, cy, av * 0.86, t.pal.avatar_glyph);
 
-    let tx = card_x + m.inner + m.icon + m.icon_gap;
+    // The name clears the avatar, which is wider than a row's icon column:
+    // ColorOS's 40 dp disc otherwise runs into the model name.
+    let tx = if t.style == Style::ColorOs {
+        card_x + m.avatar_inset + m.avatar + m.icon_gap
+    } else {
+        card_x + m.inner + m.icon + m.icon_gap
+    };
     let (tt, tb) = f.heading.ink(m.account_title_px);
     let (st, sb) = f.body.ink(m.sub_px);
     let block = (tb - tt) + m.sub_gap + (sb - st);
@@ -2333,38 +2348,45 @@ pub fn hero_card(
     let m = &t.m;
     let (x, w) = (m.margin, m.w as f32 - m.margin * 2.0);
     let (cw, ch) = (w.ceil() as u32, height.ceil() as u32);
-    let mut card = Canvas::new(cw, ch);
-    // Deep indigo overhead, violet through the middle, a warm glow at the
-    // foot, as the stock wallpaper runs.
-    let (head, middle, foot) = (Rgba::rgb(33, 35, 74), Rgba::rgb(108, 88, 188), Rgba::rgb(196, 116, 112));
-    let (cw_f, ch_f) = (cw.max(1) as f32, ch.max(1) as f32);
-    card.shade_rows(0, ch, |x, y| {
-        let (fx, fy) = (x / cw_f, y / ch_f);
-        let base = if fy < 0.62 {
-            mix(head, middle, fy / 0.62)
-        } else {
-            mix(middle, foot, (fy - 0.62) / 0.38 * 0.6)
-        };
-        // The stock card carries two soft lights: a violet one high on the
-        // right and a warm one low on the left.
-        let violet = {
-            let (dx, dy) = (fx - 0.82, fy - 0.16);
-            (1.0 - (dx * dx + dy * dy).sqrt() / 0.62).clamp(0.0, 1.0).powi(2) * 0.45
-        };
-        let warm = {
-            let (dx, dy) = ((fx - 0.14) * 0.9, fy - 1.02);
-            (1.0 - (dx * dx + dy * dy).sqrt() / 0.66).clamp(0.0, 1.0).powi(2) * 0.6
-        };
-        mix(mix(base, Rgba::rgb(132, 108, 226), violet), Rgba::rgb(244, 128, 58), warm)
-    });
-    // Round the card's corners by laying its own shape over the field: the
-    // gradient is made as a rectangle first, then masked.
-    let mut mask = Canvas::new(cw, ch);
-    mask.fill_round_rect(0.0, 0.0, w, height, m.card_radius, Rgba::rgb(255, 255, 255));
-    for i in 0..(cw * ch) as usize {
-        card.data[i * 4 + 3] = ((card.data[i * 4 + 3] as u32 * mask.data[i * 4 + 3] as u32) / 255) as u8;
+    // A build with ColorOS's own hero art lays it down; one without draws
+    // the same kind of field itself.
+    match crate::hero::installed().filter(|art| art.w == cw && art.h == ch) {
+        Some(art) => c.lay(art, x as i32, top as i32, 1.0),
+        None => {
+            let mut card = Canvas::new(cw, ch);
+            // Deep indigo overhead, violet through the middle, a warm glow
+            // at the foot, as the stock wallpaper runs.
+            let (head, middle, foot) = (Rgba::rgb(33, 35, 74), Rgba::rgb(108, 88, 188), Rgba::rgb(196, 116, 112));
+            let (cw_f, ch_f) = (cw.max(1) as f32, ch.max(1) as f32);
+            card.shade_rows(0, ch, |x, y| {
+                let (fx, fy) = (x / cw_f, y / ch_f);
+                let base = if fy < 0.62 {
+                    mix(head, middle, fy / 0.62)
+                } else {
+                    mix(middle, foot, (fy - 0.62) / 0.38 * 0.6)
+                };
+                // The stock card carries two soft lights: a violet one high
+                // on the right and a warm one low on the left.
+                let violet = {
+                    let (dx, dy) = (fx - 0.82, fy - 0.16);
+                    (1.0 - (dx * dx + dy * dy).sqrt() / 0.62).clamp(0.0, 1.0).powi(2) * 0.45
+                };
+                let warm = {
+                    let (dx, dy) = ((fx - 0.14) * 0.9, fy - 1.02);
+                    (1.0 - (dx * dx + dy * dy).sqrt() / 0.66).clamp(0.0, 1.0).powi(2) * 0.6
+                };
+                mix(mix(base, Rgba::rgb(132, 108, 226), violet), Rgba::rgb(244, 128, 58), warm)
+            });
+            // Round the card's corners by laying its own shape over the
+            // field: the gradient is made as a rectangle first, then masked.
+            let mut mask = Canvas::new(cw, ch);
+            mask.fill_round_rect(0.0, 0.0, w, height, m.card_radius, Rgba::rgb(255, 255, 255));
+            for i in 0..(cw * ch) as usize {
+                card.data[i * 4 + 3] = ((card.data[i * 4 + 3] as u32 * mask.data[i * 4 + 3] as u32) / 255) as u8;
+            }
+            c.lay(&card, x as i32, top as i32, 1.0);
+        }
     }
-    c.lay(&card, x as i32, top as i32, 1.0);
 
     let white = Rgba::rgb(255, 255, 255);
     let cx = m.w as f32 / 2.0;
@@ -3339,5 +3361,74 @@ mod tests {
         // A page with no back control puts its title at the page's margin.
         let root = big_title_with(&t, &f, "Skyward", false);
         assert!(root.x < title.x, "the root title starts at the margin: {} vs {}", root.x, title.x);
+    }
+
+    #[test]
+    fn a_coloros_back_control_is_an_arrow_with_a_shaft() {
+        let ink = Rgba::rgb(0, 0, 0);
+        let t = Theme::coloros_light(1080, 2412, 3.0);
+        let mut c = Canvas::filled(1080, 2412, t.pal.bg);
+        back_arrow(&mut c, &t, ink);
+        let m = &t.m;
+        // Three quarters along the control, past the head: the arrow's chin
+        // and its tail run the centre line, where the bare chevron is bare.
+        let probe = m.back_x + m.back_w * 0.75;
+        assert!(at(&c, probe, m.back_cy)[0] < 128, "the shaft runs through the middle");
+
+        // The head reaches 40% along the shaft, as the stock control's does:
+        // a point halfway down its upper stroke is inked, and one past the
+        // head on the same line is not.
+        let head_x = m.back_x + m.back_w * 0.4;
+        let head_y = m.back_cy - (m.back_h - m.back_stroke) / 2.0;
+        let tip_x = m.back_x + m.back_stroke / 2.0;
+        let mid = ((tip_x + head_x) / 2.0, (m.back_cy + head_y) / 2.0);
+        assert!(at(&c, mid.0, mid.1)[0] < 128, "the head slopes from the tip");
+        assert!(at(&c, head_x + m.back_w * 0.2, head_y)[0] > 128, "and ends at the head");
+
+        // HyperOS keeps its chevron, so the same point stays background.
+        let h = Theme::light(1080, 2412, 3.0);
+        let mut c = Canvas::filled(1080, 2412, h.pal.bg);
+        back_arrow(&mut c, &h, ink);
+        assert!(at(&c, h.m.back_x + h.m.back_w * 0.75, h.m.back_cy)[0] > 128, "HyperOS draws no shaft");
+    }
+
+    #[test]
+    fn coloros_draws_its_own_icon_for_the_jobs_it_has_one_and_the_shared_glyph_for_the_rest() {
+        for icon in [Icon::Phone, Icon::Lock, Icon::More, Icon::Gear, Icon::Shield, Icon::Wlan, Icon::Battery] {
+            assert!(icons::has_coloros_icon(icon), "{icon:?} has a ColorOS drawing");
+        }
+        for icon in [Icon::Folder, Icon::Usb, Icon::Power, Icon::Terminal] {
+            assert!(!icons::has_coloros_icon(icon), "{icon:?} keeps the shared glyph");
+        }
+        // The ColorOS phone is drawn, in its own box, in its own grey.
+        let t = Theme::coloros_light(1080, 2412, 3.0);
+        let mut c = Canvas::filled(1080, 2412, t.pal.bg);
+        icons::glyph_for(&mut c, &t, Icon::Phone, 540.0, 540.0, 72.0, t.pal.text);
+        let (left, top, right, bottom) = ink_box(&c, Rect::new(504.0, 504.0, 72.0, 72.0), |p| p[0] < 128 && p[3] > 0);
+        assert!(right > left && bottom > top, "the phone is drawn");
+        assert!(((left + right) / 2.0 - 540.0).abs() < 6.0, "centred across: {left}..{right}");
+        assert!(((top + bottom) / 2.0 - 540.0).abs() < 6.0, "centred down: {top}..{bottom}");
+
+        // A brand-coloured icon keeps its colour: the WLAN's fan is blue
+        // even where the row's ink is the page's black.
+        let mut c = Canvas::filled(1080, 2412, t.pal.bg);
+        icons::glyph_for(&mut c, &t, Icon::Wlan, 540.0, 540.0, 72.0, t.pal.text);
+        let (left, top, right, bottom) = ink_box(&c, Rect::new(504.0, 504.0, 72.0, 72.0), |p| p[3] > 0 && p[2] > 128 && p[0] < 128);
+        assert!(right > left && bottom > top, "the fan is drawn in blue");
+    }
+
+    #[test]
+    fn a_coloros_device_card_sets_the_model_clear_of_its_avatar() {
+        let t = Theme::coloros_light(1080, 2412, 3.0);
+        let f = crate::font::bundled();
+        let mut c = Canvas::filled(1080, 2412, t.pal.bg);
+        let top = 120.0;
+        device_card(&mut c, &t, &f, top, "OnePlus 8T", "kebab · OS4.0.4.0", &[]);
+        let av_right = t.m.margin + t.m.avatar_inset + t.m.avatar;
+        // Scan from the disc's edge rightwards and take the first inked
+        // pixel: that is the model name's left edge.
+        let area = Rect::new(av_right, top, t.m.w as f32 - av_right - t.m.margin, t.m.account_row_h);
+        let (left, _, _, _) = ink_box(&c, area, |p| p[0] < 128 && p[3] > 0);
+        assert!(left >= av_right + 1.0, "the model clears the avatar: {left} vs {av_right}");
     }
 }
