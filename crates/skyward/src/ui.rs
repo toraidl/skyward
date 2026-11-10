@@ -1090,6 +1090,28 @@ fn install_options(app: &App) -> Options {
 /// How often the WLAN page scans while it shows.
 const SCAN_EVERY: Duration = Duration::from_secs(10);
 
+/// How often the port is asked to take a configuration before the recovery
+/// gives up on it, and how long it waits between tries. Taking the port
+/// down and binding it again can race the phone's own init while it is
+/// still making the gadget, which answers with an ENODEV that the next try
+/// does not see.
+const PORT_TRIES: u32 = 8;
+const PORT_RETRY: Duration = Duration::from_millis(250);
+
+fn take_port(config: &str) -> Result<()> {
+    let mut last = None;
+    for _ in 0..PORT_TRIES {
+        match skyward_sys::usb::switch(config, USB_TIMEOUT) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last = Some(e);
+                std::thread::sleep(PORT_RETRY);
+            }
+        }
+    }
+    Err(last.expect("every try failed"))
+}
+
 fn wlan_worker(w: &Option<wlan::Worker>) -> Result<&wlan::Worker> {
     w.as_ref().context("the phone's WLAN is not brought up")
 }
@@ -1356,7 +1378,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
     // The port came up with adb alone; at rest it offers file transfer
     // beside it.
     if transfer.is_some() && !fastboot && !sideloading {
-        if let Err(e) = skyward_sys::usb::switch(skyward_sys::usb::resting(), USB_TIMEOUT) {
+        if let Err(e) = take_port(skyward_sys::usb::resting()) {
             skyward_sys::kmsg(&format!("the port did not take file transfer: {e:#}"))?;
             app.report(&format!("{e:#}"), monotonic_ms());
         }
@@ -2389,7 +2411,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                     // init stops fastbootd as the port goes through "none";
                     // then the slot's partitions come up as at boot.
                     Effect::EnterRecovery => {
-                        skyward_sys::usb::switch(skyward_sys::usb::resting(), USB_TIMEOUT)?;
+                        take_port(skyward_sys::usb::resting())?;
                         let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
                         crate::prepare(cfg, slot)?;
                         read_at = Instant::now();
@@ -2406,7 +2428,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
                                 Ok(t) => {
                                     transfer = Some(t);
                                     if rests {
-                                        if let Err(e) = skyward_sys::usb::switch(skyward_sys::usb::resting(), USB_TIMEOUT) {
+                                        if let Err(e) = take_port(skyward_sys::usb::resting()) {
                                             skyward_sys::kmsg(&format!("the port did not take file transfer: {e:#}"))?;
                                             app.report(&format!("{e:#}"), now);
                                         }
