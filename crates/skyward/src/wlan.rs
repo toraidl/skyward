@@ -751,7 +751,21 @@ fn bring_up(cfg: &Config, modules: &[PathBuf]) -> Result<()> {
             thread::sleep(Duration::from_millis(100));
         }
     }
-    iface::set_up(&cfg.interface, true)
+    // CNSS can publish wlan0 before its own bring-up has finished. Until
+    // that idle restart completes the kernel answers EAGAIN rather than
+    // taking the interface up; asking again is what the phone's own WLAN
+    // service does, and the next ask wakes CNSS.
+    let until = Instant::now() + INTERFACE_WAIT;
+    loop {
+        match iface::set_up(&cfg.interface, true) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.chain().any(|cause| cause.downcast_ref::<io::Error>().is_some_and(|io| io.kind() == io::ErrorKind::WouldBlock)) => {
+                ensure!(Instant::now() < until, "{} is not ready to come up: {e}", cfg.interface);
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 /// Put a file the driver asks for where the firmware loader looks.
@@ -776,7 +790,11 @@ fn place(file: &Firmware) -> Result<()> {
                 skyward_block::mount::mount_ro(&device, &at)?;
             }
             let read = fs::read(at.join(&file.path)).with_context(|| format!("read {} on {partition}", file.path));
-            skyward_block::mount::umount(&at)?;
+            // The firmware loader can still hold a file from a read-only
+            // mount just as the next file is being taken out. Detach the
+            // mount from the tree instead of waiting for every reader to
+            // close; the mount itself goes away when the last one does.
+            skyward_block::mount::umount_detach(&at)?;
             read?
         }
     };
