@@ -721,20 +721,27 @@ mod tests {
             paths,
             [
                 "/system/bin/hwservicemanager",
-                "/system/bin/qseecomd",
-                "/system/bin/android.hardware.keymaster@4.1-service-qti",
-                "/system/bin/android.hardware.gatekeeper@1.0-service-qti",
-                "/system/bin/hw/vendor.oplus.hardware.cryptoeng@1.0-service",
+                "/system/bin/sh",
+                "/vendor/bin/qseecomd",
+                "/vendor/bin/hw/android.hardware.keymaster@4.1-service-qti",
+                "/vendor/bin/hw/android.hardware.gatekeeper@1.0-service-qti",
+                "/vendor/bin/qrtr-ns",
+                "/system/bin/sh",
+                "/vendor/bin/cnss-daemon",
             ],
             "the secure services start in the order they depend on one another"
         );
         assert_eq!(
-            cfg.services[4].ready_hardware_service.as_deref(),
-            Some("vendor.oplus.hardware.cryptoeng@1.0::ICryptoeng/default")
+            paths.iter().filter(|p| p.ends_with("cryptoeng@1.0-service")).count(),
+            0,
+            "OPPO's engine links a jsoncpp ABI the phone no longer carries, and the data partition is opened through keymaster instead"
         );
         let wlan = cfg.wlan.expect("the Find X3's WLAN is brought up");
         assert_eq!(wlan.interface, "wlan0");
-        assert!(wlan.firmware.iter().any(|f| f.name == "bdwlan.elf"), "the board data is staged");
+        assert!(
+            wlan.firmware.iter().any(|f| f.name == "bdwlan.elf" && f.path == "/persist/bdwlan.elf"),
+            "the phone's own board data is staged, not the modem's factory copy"
+        );
         assert!(wlan.modules.is_empty(), "the recovery kernel carries the QCA6390 driver");
     }
 

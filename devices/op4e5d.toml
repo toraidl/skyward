@@ -43,8 +43,12 @@ mounted = ["metadata", "persist"]
 
 # The phone's hardware services, started in the order they depend on one
 # another: the directory the older kind registers with, the secure world's
-# listener daemon, the key and credential services, then OPPO's encryption
-# engine, which the secure world reaches for while vold opens user files.
+# listener daemon, the key and credential services, then the WLAN daemons.
+#
+# The programs are the installed system's own, and their libraries are
+# looked for in its partitions first: the recovery ramdisk carries an older
+# copy of QTI's keymaster, and a key the installed system made has to be
+# read by the same build that wrote it.
 [[service]]
 path = "/system/bin/hwservicemanager"
 libraries = ["/system/lib64"]
@@ -52,12 +56,23 @@ ready_property = "hwservicemanager.ready"
 user = "root"
 groups = ["root"]
 
+# The installed persist partition is mounted at /persist, the folder the
+# phone's own build calls /mnt/vendor/persist: the WLAN's MAC address and
+# the network the WLAN page joins are kept there. Point the name the phone
+# uses at it, as its own first-stage init does.
+[[service]]
+path = "/system/bin/sh"
+args = ["-c", "mkdir -p /mnt/vendor && ln -sfn /persist /mnt/vendor/persist"]
+oneshot = true
+user = "root"
+groups = ["root"]
+
 # The daemon the secure world reaches back into Android through. Until its
 # listeners are registered, the secure world's apps, the key service among
 # them, cannot run.
 [[service]]
-path = "/system/bin/qseecomd"
-libraries = ["/system/lib64", "/vendor/lib64"]
+path = "/vendor/bin/qseecomd"
+libraries = ["/vendor/lib64", "/system/lib64"]
 ready_property = "vendor.sys.listeners.registered"
 user = "root"
 groups = ["root"]
@@ -65,39 +80,70 @@ groups = ["root"]
 # The key service, the only thing that can use the keys the phone wrapped
 # in hardware.
 [[service]]
-path = "/system/bin/android.hardware.keymaster@4.1-service-qti"
-libraries = ["/system/lib64", "/vendor/lib64"]
+path = "/vendor/bin/hw/android.hardware.keymaster@4.1-service-qti"
+libraries = ["/vendor/lib64", "/system/lib64"]
 ready_hardware_service = "android.hardware.keymaster@4.1::IKeymasterDevice/default"
-user = "root"
-groups = ["root"]
+user = "system"
+groups = ["system", "drmrpc"]
 
 # The credential service, which is what the secure world has check the
 # secret behind a screen lock.
 [[service]]
-path = "/system/bin/android.hardware.gatekeeper@1.0-service-qti"
-libraries = ["/system/lib64", "/vendor/lib64"]
+path = "/vendor/bin/hw/android.hardware.gatekeeper@1.0-service-qti"
+libraries = ["/vendor/lib64", "/system/lib64"]
 ready_hardware_service = "android.hardware.gatekeeper@1.0::IGatekeeper/default"
+user = "system"
+groups = ["system"]
+
+# The name service the WLAN's firmware finds its QMI server through. MHI
+# reaches mission mode without it, but firmware-ready then times out.
+[[service]]
+path = "/vendor/bin/qrtr-ns"
+args = ["-f"]
+libraries = ["/vendor/lib64", "/system/lib64"]
+user = "vendor_qrtr"
+groups = ["vendor_qrtr"]
+capabilities = ["NET_BIND_SERVICE"]
+
+# cnss-daemon binds its socket before it registers with WLFW. Before
+# /data is decrypted those directories live only in the ramdisk; create
+# them without changing an existing directory or calibration file.
+[[service]]
+path = "/system/bin/sh"
+args = ["-c", '''
+set -eu
+if [ ! -d /data/vendor ]; then
+    /system/bin/toybox mkdir -p /data/vendor
+    /system/bin/toybox chmod 0755 /data/vendor
+fi
+for directory in /data/vendor/wifi /data/vendor/wifi/sockets; do
+    if [ ! -d "$directory" ]; then
+        /system/bin/toybox mkdir "$directory"
+        /system/bin/toybox chown 1010:1010 "$directory"
+        /system/bin/toybox chmod 0770 "$directory"
+    fi
+done
+''']
+oneshot = true
 user = "root"
 groups = ["root"]
 
-# OPPO's own encryption engine. The stock recovery starts it from
-# init.recovery.qcom.rc as soon as the service directory is up; vold asks
-# it for the keys that wrap a user's file encryption key.
+# The daemon that answers the WLAN firmware's QMI requests: without it the
+# chip loads its firmware and then waits, and the interface is never made.
 [[service]]
-path = "/system/bin/hw/vendor.oplus.hardware.cryptoeng@1.0-service"
-# The installed build keeps the interface's library in odm, the stock
-# recovery kept it in the ramdisk's vendor folder: look in both, after the
-# recovery's own.
-libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64"]
-ready_hardware_service = "vendor.oplus.hardware.cryptoeng@1.0::ICryptoeng/default"
-user = "root"
-groups = ["root", "input", "sdcard_rw", "sdcard_r"]
+path = "/vendor/bin/cnss-daemon"
+args = ["-n", "-l"]
+libraries = ["/vendor/lib64", "/system/lib64"]
+user = "system"
+groups = ["system", "inet", "net_admin", "wifi"]
+capabilities = ["NET_ADMIN"]
 
 # The WLAN is QCA6390 on the kona platform, the chip the recovery kernel
 # carries: the same one the OnePlus 8T has. Its firmware is in the modem
-# partition's image/qca6390, its board data is in the modem image and in
-# persist, and the phone's own supplicant joins networks. Not yet tried on
-# the phone, so it stays best-effort until a run with logs says otherwise.
+# partition's image/qca6390 and its board data in persist; cnss-daemon
+# answers the firmware's QMI requests and the phone's own supplicant scans
+# and joins networks. The image carries the supplicant's HIDL interfaces and
+# a libssl to match its libcrypto, without which neither starts.
 [wlan]
 modules = []
 # fs_ready starts CNSS calibration. The built-in HDD driver itself loads
@@ -112,11 +158,14 @@ firmware = [
     # image/qca6390.
     { name = "amss20.bin", partition = "modem", filesystem = "vfat", path = "image/qca6390/amss20.bin" },
     { name = "m3.bin", partition = "modem", filesystem = "vfat", path = "image/qca6390/m3.bin" },
-    { name = "bdwlan.elf", partition = "modem", filesystem = "vfat", path = "image/qca6390/bdwlan.elf" },
-    # The driver's own configuration and the MAC address the phone keeps
-    # for this chip, both in the installed vendor partition.
+    # The board data the phone calibrated for itself. The modem carries a
+    # factory copy; this one is the phone's own.
+    { name = "bdwlan.elf", path = "/persist/bdwlan.elf" },
+    # The driver's own configuration, in the installed vendor partition.
+    # The MAC address file the vendor names is a symlink into a persist
+    # folder this phone does not have, as it is on the running system too:
+    # the driver falls back to the address in its own storage.
     { name = "wlan/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/qca6390/WCNSS_qcom_cfg.ini" },
-    { name = "wlan/qca_cld/qca6390/wlan_mac.bin", path = "/vendor/firmware/wlan/qca_cld/qca6390/wlan_mac.bin" },
 ]
 interface = "wlan0"
 supplicant = "/vendor/bin/hw/wpa_supplicant"

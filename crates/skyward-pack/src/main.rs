@@ -193,6 +193,7 @@ fn main() -> Result<()> {
                 rd.add(paths::TASK_PROFILES, 0o644, TASK_PROFILES.to_vec())?;
             }
             disable_stock_recovery_ui(&mut rd)?;
+            disable_unusable_cryptoeng(&mut rd)?;
             let mut rules = MTP_RC.to_vec();
             if device.adb.tcp_port.is_some() {
                 // Its TCP listener must start even when the USB gadget never
@@ -403,6 +404,56 @@ fn disable_stock_recovery_ui(rd: &mut Ramdisk) -> Result<()> {
     rd.replace(INIT_RC, out.into_bytes())
 }
 
+/// The stock recovery starts OPPO's crypto engine from its own init rules
+/// as soon as the hardware service directory is up. That program runs from
+/// the ramdisk's older `/system` and links libraries the installed build no
+/// longer carries there, so init starts it again every time it falls over.
+/// Skyward opens the data partition through keymaster itself and never asks
+/// that engine for anything, so every start of it is taken out of the rules
+/// and the service is left disabled.
+fn disable_unusable_cryptoeng(rd: &mut Ramdisk) -> Result<()> {
+    const SERVICE: &str = "hal_cryptoeng_oplus";
+    let start = format!("start {SERVICE}");
+    let declaration = format!("service {SERVICE} ");
+    let mut changed = Vec::new();
+    for entry in &rd.entries {
+        if !entry.name.ends_with(".rc") {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&entry.data);
+        if !text.lines().any(|l| l.trim_start().starts_with(&declaration)) {
+            continue;
+        }
+        let lines: Vec<&str> = text.lines().collect();
+        let mut out = String::with_capacity(text.len());
+        let mut at = 0;
+        while at < lines.len() {
+            let line = lines[at];
+            at += 1;
+            if line.trim() == start {
+                continue;
+            }
+            out.push_str(line);
+            out.push('\n');
+            if !line.trim_start().starts_with(&declaration) {
+                continue;
+            }
+            let already = lines[at..]
+                .iter()
+                .take_while(|l| !l.trim().is_empty() && !l.starts_with("service ") && !l.starts_with("on "))
+                .any(|l| l.trim() == "disabled");
+            if !already {
+                out.push_str("    disabled\n");
+            }
+        }
+        changed.push((entry.name.clone(), out.into_bytes()));
+    }
+    for (name, data) in changed {
+        rd.replace(&name, data)?;
+    }
+    Ok(())
+}
+
 /// A property file without the lines that set any of `names`.
 fn without(props: &[u8], names: &[&str]) -> Vec<u8> {
     let mut out = Vec::with_capacity(props.len());
@@ -466,6 +517,31 @@ ro.vendor.build.security_patch=2026-10-01\nro.vendor.build.security_patch_level=
         assert!(text.contains("ro.build.version.release_or_codename=13"), "a longer name is left alone");
         assert!(text.contains("ro.vendor.build.security_patch_level=1"), "a longer name is left alone");
         assert!(text.contains("ro.build.id=TQ") && text.contains("ro.product.name=ishtar"));
+    }
+
+    #[test]
+    fn oppo_cryptoeng_is_left_disabled_and_never_started() {
+        let rc = b"service hal_cryptoeng_oplus /system/bin/hw/x\n    user root\n\n\
+on property:hwservicemanager.ready=true\n    start hal_cryptoeng_oplus\n    setprop ro.separate.soft x\n";
+        let mut rd = Ramdisk {
+            entries: vec![ramdisk::Entry {
+                name: "init.recovery.qcom.rc".into(),
+                mode: 0o100644,
+                uid: 0,
+                gid: 0,
+                mtime: 0,
+                nlink: 1,
+                dev: (0, 0),
+                rdev: (0, 0),
+                data: rc.to_vec(),
+            }],
+            compression: ramdisk::Compression::None,
+        };
+        disable_unusable_cryptoeng(&mut rd).unwrap();
+        let text = String::from_utf8(rd.find("init.recovery.qcom.rc").unwrap().data.clone()).unwrap();
+        assert!(!text.contains("start hal_cryptoeng_oplus"), "init no longer starts it");
+        assert!(text.contains("    disabled\n"), "and would not start it by class either");
+        assert!(text.contains("setprop ro.separate.soft x"), "the rest of the trigger stays");
     }
 
     #[test]

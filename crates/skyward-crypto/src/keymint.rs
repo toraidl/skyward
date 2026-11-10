@@ -221,10 +221,11 @@ impl<'a> KeyMintDevice<'a> {
                 // The phone's firmware has moved on since this key was
                 // made. Renewing it gives a key for the firmware running
                 // now; the one on disk is left as it is, so nothing of the
-                // phone's own is changed by reading it here.
-                let renewed = self
-                    .upgrade(key_blob, |call| Self::gcm_params(call, app_id, nonce))
-                    .context("renew the key for the firmware running now")?;
+                // phone's own is changed by reading it here. A renewal names
+                // nothing: the key blob already carries what it is bound to,
+                // and a decryption's parameters are not a renewal's to send.
+                // keystore2 renews with an empty set for the same reason.
+                let renewed = self.upgrade(key_blob, |call| call.i32(0)).context("renew the key for the firmware running now")?;
                 self.begin(&renewed, app_id, nonce, note)?
             }
             Err(e) => return Err(e),

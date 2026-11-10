@@ -17,6 +17,11 @@ use std::time::{Duration, Instant};
 /// before it is started again.
 const RESTART_DELAY: Duration = Duration::from_secs(1);
 
+/// How long the wait between starts may grow to. A program that cannot
+/// start at all would otherwise end and be started again twice a second
+/// forever, and the recovery would spend its time on it.
+const RESTART_DELAY_LONGEST: Duration = Duration::from_secs(30);
+
 /// How long a program gets to become what it says it will be.
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
 const READY_POLL: Duration = Duration::from_millis(100);
@@ -190,6 +195,7 @@ fn ready(s: &Service) -> Result<()> {
 }
 
 fn supervise(s: &Service, who: &Credentials) -> ! {
+    let mut quick = 0;
     loop {
         let started = Instant::now();
         let ended = match running(&s.path) {
@@ -202,9 +208,19 @@ fn supervise(s: &Service, who: &Credentials) -> ! {
         };
         let _ = skyward_sys::kmsg(&line);
         if started.elapsed() < RESTART_DELAY {
-            thread::sleep(RESTART_DELAY);
+            thread::sleep(restart_delay(quick));
+            quick = quick.saturating_add(1);
+        } else {
+            quick = 0;
         }
     }
+}
+
+/// How long to wait before starting a program again that has ended at once
+/// `quick` times in a row: twice as long each time, up to the longest.
+fn restart_delay(quick: u32) -> Duration {
+    let factor = 1u32 << quick.min(5);
+    (RESTART_DELAY * factor).min(RESTART_DELAY_LONGEST)
 }
 
 /// Start the program and wait for it to end.
@@ -343,5 +359,16 @@ fn wait_for(pid: u32) -> Result<()> {
         if e.kind() != io::ErrorKind::Interrupted {
             return Err(e).context("wait on the pidfd");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_program_that_keeps_ending_at_once_is_waited_for_longer() {
+        let waits: Vec<u64> = (0..7).map(|quick| restart_delay(quick).as_secs()).collect();
+        assert_eq!(waits, [1, 2, 4, 8, 16, 30, 30], "the wait doubles, then stays at the longest");
     }
 }

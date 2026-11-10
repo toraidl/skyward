@@ -178,9 +178,11 @@ impl<'a> Keymaster<'a> {
             Err(e) if refusal(&e) == Some(KEY_REQUIRES_UPGRADE) => {
                 // The phone's firmware has moved on since this key was made.
                 // Renewing it gives a key for the firmware running now; the
-                // one on disk is left as it is.
-                let params = Self::gcm_params(app_id, nonce);
-                let renewed = self.upgrade(key_blob, &params).context("renew the key for the firmware running now")?;
+                // one on disk is left as it is. A renewal names nothing: the
+                // key blob already carries what it is bound to, and the
+                // service refuses a decryption's parameters in a renewal.
+                // keystore2 renews with an empty set for the same reason.
+                let renewed = self.upgrade(key_blob, &[]).context("renew the key for the firmware running now")?;
                 self.begin(&renewed, app_id, nonce, note)?
             }
             Err(e) => return Err(e),
