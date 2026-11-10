@@ -242,6 +242,7 @@ fn run(ctx: &mut Context) -> Outcome {
 }
 
 /// What installing came to while the package was still served.
+#[derive(Debug)]
 enum Done {
     Decided(Outcome),
     /// update_engine failed with this code.
@@ -414,6 +415,11 @@ fn rescue_answer(name: &str) -> String {
 /// The outcome, given how serving the package went: a package that stopped
 /// being readable explains whatever failed after.
 fn conclude(done: Done, served: Result<Option<Fault>>, origin: Origin) -> Outcome {
+    if let Ok(Some(fault)) = &served {
+        // Computer transfer errors become Disconnected in the UI. Keep
+        // the cause and child result before that classification loses them.
+        let _ = kmsg(&format!("install: package read fault {fault:?}; installer result {done:?}"));
+    }
     match (done, served) {
         (Done::Decided(outcome), served) => {
             if let Err(e) = served {

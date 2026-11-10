@@ -506,6 +506,18 @@ fn answer(ep0: &File, stop: &OwnedFd, shared: &Shared) -> Result<()> {
         let n = { ep0 }.read(&mut event).context("read a USB control event")?;
         ensure!(n == event.len(), "a USB control event of {n} bytes");
         let ev = Event::read_from_bytes(&event).expect("the buffer is one event");
+        let transition = match ev.kind {
+            BIND => Some("bound"),
+            UNBIND => Some("unbound"),
+            ENABLE => Some("enabled"),
+            DISABLE => Some("disabled"),
+            SUSPEND => Some("suspended"),
+            RESUME => Some("resumed"),
+            _ => None,
+        };
+        if let Some(transition) = transition {
+            let _ = skyward_sys::kmsg(&format!("sideload USB: {transition}"));
+        }
         match ev.kind {
             ENABLE => shared.set(|s| s.enabled = true),
             DISABLE | UNBIND => shared.set(|s| s.enabled = false),

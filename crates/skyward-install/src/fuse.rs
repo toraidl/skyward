@@ -234,6 +234,14 @@ impl Server {
             let index = at / block_size;
             let within = (at % block_size) as usize;
             if let Err(e) = self.load(index, fetch) {
+                // mmap callers see SIGBUS when a page cannot be fetched.
+                // Keep the failed byte range and source error so that this
+                // is distinguishable from a ZIP parser crash.
+                #[cfg(target_os = "android")]
+                let _ = skyward_sys::kmsg(&format!(
+                    "sideload FUSE: read offset={offset} size={size}, block={index} block_size={block_size} package_size={}: {e:?}",
+                    self.offer.size
+                ));
                 self.fault = Some(e);
                 return error(unique, libc::EIO);
             }
