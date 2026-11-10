@@ -485,6 +485,20 @@ fn release_one(p: &Partition, slot: Slot) -> Result<()> {
         match snapshots::unmap_snapshot(&p.name) {
             Ok(()) => return Ok(()),
             Err(e) if busy_error(&e) && Instant::now() < until => thread::sleep(Duration::from_millis(100)),
+            Err(e) if busy_error(&e) => {
+                // A just-detached mount can outlive the mount point by more
+                // than a fixed grace period. Let the kernel queue the removal
+                // once its last reference goes, then wait for it to vanish.
+                dm::remove_when_free(&p.name).context("queue the busy mapping's removal")?;
+                let end = Instant::now() + Duration::from_secs(20);
+                while Instant::now() < end {
+                    if dm::status(&p.name)?.is_none() {
+                        return Ok(());
+                    }
+                    thread::sleep(Duration::from_millis(100));
+                }
+                return Err(e.context(format!("{} stayed busy after deferred removal", p.name)));
+            }
             Err(e) => return Err(e),
         }
     }

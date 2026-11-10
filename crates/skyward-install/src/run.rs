@@ -793,9 +793,10 @@ fn run_script(ctx: &mut Context, size: u64) -> Result<Done> {
     if ctx.shared.cancelled() {
         return Ok(Done::Decided(Outcome::Cancelled));
     }
-    // A script may write over any partition, so whoever is at the screen
-    // agrees to it first; the system agreed to what it asked for.
-    if !matches!(ctx.origin, Origin::Asked { .. }) {
+    // A script may write over any partition. The system agreed to what it
+    // asked for, and a computer that ran adb sideload already chose this
+    // package; only a file opened on the phone needs a second confirmation.
+    if !matches!(ctx.origin, Origin::Asked { .. } | Origin::Computer) {
         ctx.send(Event::Script);
         match ctx.commands.recv() {
             Ok(Command::Install) => {}

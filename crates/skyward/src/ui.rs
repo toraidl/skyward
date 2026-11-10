@@ -1075,11 +1075,24 @@ fn detach(cfg: &DeviceConfig) -> Detach {
         let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
         if stop_services {
             services::stop(&programs)?;
+            services::stop_init_services()?;
             // Pinning keeps a file mapped for the rest of this process, and
             // the device it came from busy. A stock script OTA removes the
             // whole dynamic partition group, so it cannot run alongside a
             // pin even after the services themselves have stopped.
-            return skyward_vab::release_partitions(slot, &[]);
+            return match skyward_vab::release_partitions(slot, &[]) {
+                Ok(()) => Ok(()),
+                Err(first) => {
+                    // init may have restarted a service after the first
+                    // stop. Kill it again and retry once before failing the
+                    // install.
+                    let _ = skyward_sys::kmsg(&format!(
+                        "install: the partitions did not leave at once ({first:#}); stopping init services again"
+                    ));
+                    services::stop_init_services()?;
+                    skyward_vab::release_partitions(slot, &[]).context("release the partitions after stopping init again")
+                }
+            };
         }
         let mounted = skyward_vab::mounted_partitions(slot)?;
         let busy = services::pin(&programs, &mounted)?;

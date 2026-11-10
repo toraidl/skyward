@@ -102,6 +102,35 @@ pub fn stop(programs: &[String]) -> Result<()> {
     }
 }
 
+/// Stop the services the stock recovery's init owns, which are separate
+/// from the services this recovery supervises. A script OTA removes the
+/// dynamic partition group they may still be using.
+pub fn stop_init_services() -> Result<()> {
+    const INIT: [&str; 6] =
+        ["gatekeeper-1-0-qti", "hwservicemanager", "health-hal-2-1", "keystore2", "servicemanager", "vndservicemanager"];
+    for name in INIT {
+        let state = format!("init.svc.{name}");
+        if skyward_sys::prop(&state).as_deref() == Some("running") {
+            skyward_sys::set_prop("ctl.stop", name)?;
+        }
+    }
+    thread::sleep(Duration::from_millis(100));
+    for name in INIT {
+        let path = format!("/system/bin/{name}");
+        let pids: Vec<u32> = skyward_sys::prop(&format!("init.svc_debug_pid.{name}"))
+            .and_then(|pid| pid.parse().ok())
+            .into_iter()
+            .chain(running(&path))
+            .collect();
+        for pid in pids {
+            let _ = skyward_sys::kmsg(&format!("stopping init service {name} (pid {pid}) for an install"))?;
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+        }
+    }
+    thread::sleep(Duration::from_millis(200));
+    Ok(())
+}
+
 /// Who a program runs as and what of root's it keeps, as the phone's own
 /// init has it run, worked out before it is started: between the fork and
 /// the exec nothing may be looked up.
@@ -372,9 +401,10 @@ pub fn reachable() -> bool {
 
 /// A process already running `path`.
 pub fn running(path: &str) -> Option<u32> {
+    let name = Path::new(path).file_name()?;
     fs::read_dir("/proc").ok()?.flatten().find_map(|e| {
         let pid: u32 = e.file_name().to_str()?.parse().ok()?;
-        (fs::read_link(e.path().join("exe")).ok()? == Path::new(path)).then_some(pid)
+        (fs::read_link(e.path().join("exe")).ok()?.file_name()? == name).then_some(pid)
     })
 }
 

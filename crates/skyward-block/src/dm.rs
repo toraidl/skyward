@@ -86,6 +86,8 @@ const DM_READONLY_FLAG: u32 = 1 << 0;
 /// Asks DM_TABLE_STATUS for each target's parameters rather than its
 /// status.
 const DM_STATUS_TABLE_FLAG: u32 = 1 << 4;
+/// Remove the device once nothing holds it, instead of failing at once.
+const DM_DEFERRED_REMOVE: u32 = 1 << 17;
 /// The kernel had more to say than the buffer held.
 const DM_BUFFER_FULL_FLAG: u32 = 1 << 8;
 /// The oldest interface version with every command used here.
@@ -284,6 +286,16 @@ mod sys {
         call(&control()?, DM_DEV_REMOVE, io.as_mut_bytes()).with_context(|| format!("remove device-mapper device {name}"))
     }
 
+    /// Ask the kernel to remove `name` once its last user lets go. This is
+    /// what a mount that has just been detached may need: its device can
+    /// remain busy for a moment after the mount point is gone.
+    pub fn remove_when_free(name: &str) -> Result<()> {
+        let mut io = DmIoctl::new(name)?;
+        io.flags = DM_DEFERRED_REMOVE;
+        call(&control()?, DM_DEV_REMOVE, io.as_mut_bytes())
+            .with_context(|| format!("remove device-mapper device {name} when free"))
+    }
+
     /// Give device `name`, which may be in use, `targets` as its table,
     /// read-only or not: the device is suspended while the table is
     /// swapped in, and resumes with it.
@@ -403,6 +415,10 @@ mod sys {
         bail!("this host has no device-mapper to remove {name}")
     }
 
+    pub fn remove_when_free(name: &str) -> Result<()> {
+        bail!("this host has no device-mapper to remove {name} when free")
+    }
+
     pub fn reload(name: &str, _targets: &[Target], _readonly: bool) -> Result<()> {
         bail!("this host has no device-mapper to reload {name}")
     }
@@ -416,7 +432,7 @@ mod sys {
     }
 }
 
-pub use sys::{create, readonly, reload, remove, status, table, table_status, target_version};
+pub use sys::{create, readonly, reload, remove, remove_when_free, status, table, table_status, target_version};
 
 #[cfg(test)]
 mod tests {
