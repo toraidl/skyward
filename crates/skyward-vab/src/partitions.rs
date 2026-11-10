@@ -424,11 +424,36 @@ pub fn release_partitions(slot: Slot, busy: &[PathBuf]) -> Result<()> {
         if busy.contains(&m.mount_point) {
             mount::umount_detach_over(&m.mount_point)?;
         } else {
-            mount::umount_over(&m.mount_point)?;
-            snapshots::unmap_snapshot(&m.partition)?;
+            match mount::umount_over(&m.mount_point) {
+                Ok(()) => snapshots::unmap_snapshot(&m.partition)?,
+                // A read-only mount can still answer EBUSY when the kernel
+                // or a shared mount holds it even though no process has a
+                // file open. Let it leave the tree at once; the device stays
+                // mapped for the update, as it does for a pinned mount.
+                Err(e) if busy_error(&e) => mount::umount_detach_over(&m.mount_point)?,
+                Err(e) => return Err(e),
+            }
         }
     }
     Ok(())
+}
+
+fn busy_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| cause.downcast_ref::<std::io::Error>().is_some_and(|e| e.raw_os_error() == Some(libc::EBUSY)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::anyhow;
+
+    #[test]
+    fn an_ebusy_unmount_is_recognized_through_its_context() {
+        let busy = anyhow!(std::io::Error::from_raw_os_error(libc::EBUSY)).context("unmount /mnt/system");
+        assert!(busy_error(&busy));
+        let other = anyhow!(std::io::Error::from_raw_os_error(libc::EINVAL));
+        assert!(!busy_error(&other));
+    }
 }
 
 /// Undo `mount_partitions`: unmount the slot's partitions where their own
