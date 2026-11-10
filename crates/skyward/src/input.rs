@@ -185,12 +185,14 @@ pub struct Inputs {
     seen: HashSet<PathBuf>,
     /// What the touchscreen is told each time its panel is taken in.
     touch_writes: Vec<Write>,
+    /// Input device names left out, though they carry the panel's name.
+    skip: Vec<String>,
     w: f32,
     h: f32,
 }
 
 impl Inputs {
-    pub fn open(w: u32, h: u32, touch_writes: Vec<Write>) -> Result<Self> {
+    pub fn open(w: u32, h: u32, touch_writes: Vec<Write>, skip: Vec<String>) -> Result<Self> {
         let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
         if fd < 0 {
             return Err(io::Error::last_os_error()).context("create inotify instance");
@@ -202,8 +204,16 @@ impl Inputs {
         if unsafe { libc::inotify_add_watch(fd, dir.as_ptr(), libc::IN_CREATE | libc::IN_ATTRIB) } < 0 {
             return Err(io::Error::last_os_error()).context("watch /dev/input");
         }
-        let mut inputs =
-            Inputs { watch, panel: None, buttons: Vec::new(), seen: HashSet::new(), touch_writes, w: w as f32, h: h as f32 };
+        let mut inputs = Inputs {
+            watch,
+            panel: None,
+            buttons: Vec::new(),
+            seen: HashSet::new(),
+            touch_writes,
+            skip,
+            w: w as f32,
+            h: h as f32,
+        };
         inputs.scan()?;
         if inputs.panel.is_none() {
             eprintln!("no touch panel yet; waiting for one to appear under /dev/input");
@@ -218,6 +228,10 @@ impl Inputs {
     fn scan(&mut self) -> Result<()> {
         for (path, dev) in evdev::raw_stream::enumerate() {
             if !self.seen.insert(path.clone()) {
+                continue;
+            }
+            if dev.name().is_some_and(|name| self.skip.iter().any(|s| s == name)) {
+                eprintln!("input {}: {:?} left out, as the configuration says", path.display(), dev.name().unwrap_or("?"));
                 continue;
             }
             let direct = dev.properties().contains(PropType::DIRECT);

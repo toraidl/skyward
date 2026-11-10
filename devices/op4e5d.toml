@@ -1,0 +1,141 @@
+[device]
+codename = "OP4E5D"
+brand = "OPPO"
+model = "OPPO Find X3"
+# The Find X3 lays its partitions out once: its update packages are block
+# packages with one super partition, and neither the bootloader nor super
+# has a second layout to start from. The recovery names the partitions as
+# they are, without a slot.
+ab = false
+soc = { hans = "骁龙®870 移动平台", hant = "驍龍®870 行動平台", en = "Snapdragon® 870 Mobile Platform" }
+
+# Debug recovery: keep TCP ADB reachable after Wi-Fi comes up even when
+# the USB port is unavailable. Does not change Android's adb.
+[adb]
+tcp_port = 5555
+
+[display]
+# The panel as the phone reports it in its default FHD+ mode: 1080 by 2412
+# at 480 dpi, the 6.7-inch AMOLED of the PEDM00.
+width = 1080
+height = 2412
+density = 480
+diagonal = 6.7
+corner_radius = 100
+# Android reports the top-left cutout's bounds as x=0..165, y=0..103.
+# Leave another 24 physical pixels between that region and the clock.
+status_bar_left_inset = 189
+# OPPO's own recovery starts this panel at 1000 of 4095, which is dim.
+# Start where the panel is comfortable and let the user move the slider.
+brightness = 0.35
+
+# OPPO's touch layer also exposes a virtual device, hbtp_vm, which carries
+# the panel's name but no touches of its own. Leave it out so the panel
+# itself is the one read.
+[touch]
+skip = ["hbtp_vm"]
+
+# /metadata keeps the key the data partition opens with. /mnt/vendor/persist
+# keeps the secure world's own files, the WLAN's calibration and the network
+# the WLAN page joins. The stock recovery leaves both unmounted.
+[partitions]
+mounted = ["metadata", "persist"]
+
+# The phone's hardware services, started in the order they depend on one
+# another: the directory the older kind registers with, the secure world's
+# listener daemon, the key and credential services, then OPPO's encryption
+# engine, which the secure world reaches for while vold opens user files.
+[[service]]
+path = "/system/bin/hwservicemanager"
+libraries = ["/system/lib64"]
+ready_property = "hwservicemanager.ready"
+user = "root"
+groups = ["root"]
+
+# The daemon the secure world reaches back into Android through. Until its
+# listeners are registered, the secure world's apps, the key service among
+# them, cannot run.
+[[service]]
+path = "/system/bin/qseecomd"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_property = "vendor.sys.listeners.registered"
+user = "root"
+groups = ["root"]
+
+# The key service, the only thing that can use the keys the phone wrapped
+# in hardware.
+[[service]]
+path = "/system/bin/android.hardware.keymaster@4.1-service-qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_hardware_service = "android.hardware.keymaster@4.1::IKeymasterDevice/default"
+user = "root"
+groups = ["root"]
+
+# The credential service, which is what the secure world has check the
+# secret behind a screen lock.
+[[service]]
+path = "/system/bin/android.hardware.gatekeeper@1.0-service-qti"
+libraries = ["/system/lib64", "/vendor/lib64"]
+ready_hardware_service = "android.hardware.gatekeeper@1.0::IGatekeeper/default"
+user = "root"
+groups = ["root"]
+
+# OPPO's own encryption engine. The stock recovery starts it from
+# init.recovery.qcom.rc as soon as the service directory is up; vold asks
+# it for the keys that wrap a user's file encryption key.
+[[service]]
+path = "/system/bin/hw/vendor.oplus.hardware.cryptoeng@1.0-service"
+# The installed build keeps the interface's library in odm, the stock
+# recovery kept it in the ramdisk's vendor folder: look in both, after the
+# recovery's own.
+libraries = ["/system/lib64", "/vendor/lib64", "/odm/lib64"]
+ready_hardware_service = "vendor.oplus.hardware.cryptoeng@1.0::ICryptoeng/default"
+user = "root"
+groups = ["root", "input", "sdcard_rw", "sdcard_r"]
+
+# The WLAN is QCA6390 on the kona platform, the chip the recovery kernel
+# carries: the same one the OnePlus 8T has. Its firmware is in the modem
+# partition's image/qca6390, its board data is in the modem image and in
+# persist, and the phone's own supplicant joins networks. Not yet tried on
+# the phone, so it stays best-effort until a run with logs says otherwise.
+[wlan]
+modules = []
+# fs_ready starts CNSS calibration. The built-in HDD driver itself loads
+# only when /dev/wlan receives ON; its handler copies three bytes.
+writes = [
+    { path = "/sys/kernel/cnss/fs_ready", value = "1" },
+    { path = "/dev/wlan", value = "ON\n" },
+]
+firmware = [
+    # The stock recovery DT does not enable qcom,converged-dt, so CNSS
+    # requests flat names even though the modem stores them below
+    # image/qca6390.
+    { name = "amss20.bin", partition = "modem", filesystem = "vfat", path = "image/qca6390/amss20.bin" },
+    { name = "m3.bin", partition = "modem", filesystem = "vfat", path = "image/qca6390/m3.bin" },
+    { name = "bdwlan.elf", partition = "modem", filesystem = "vfat", path = "image/qca6390/bdwlan.elf" },
+    # The driver's own configuration and the MAC address the phone keeps
+    # for this chip, both in the installed vendor partition.
+    { name = "wlan/WCNSS_qcom_cfg.ini", path = "/vendor/etc/wifi/qca6390/WCNSS_qcom_cfg.ini" },
+    { name = "wlan/qca_cld/qca6390/wlan_mac.bin", path = "/vendor/firmware/wlan/qca_cld/qca6390/wlan_mac.bin" },
+]
+interface = "wlan0"
+supplicant = "/vendor/bin/hw/wpa_supplicant"
+libraries = ["/vendor/lib64", "/system/lib64"]
+hardware_services = [
+    "android.hardware.wifi.supplicant@1.0::ISupplicant/default",
+    "android.hardware.wifi.supplicant@1.1::ISupplicant/default",
+    "android.hardware.wifi.supplicant@1.2::ISupplicant/default",
+    "android.hardware.wifi.supplicant@1.3::ISupplicant/default",
+    "vendor.qti.hardware.wifi.supplicant@2.0::ISupplicantVendor/default",
+    "vendor.qti.hardware.wifi.supplicant@2.1::ISupplicantVendor/default",
+    "vendor.qti.hardware.wifi.supplicant@2.2::ISupplicantVendor/default",
+    "vendor.oplus.hardware.wifi.supplicant@2.0::IOplusSupplicant/default",
+]
+probe = "http://connectivitycheck.gstatic.com/generate_204"
+
+# The linear motor is an AW8697 behind /sys/class/leds/vibrator, as on the
+# OnePlus 8T: a length in duration and activate 1 buzz it, and gain sets
+# how hard. The panel's own touch driver reports the same way.
+[haptics]
+led = "/sys/class/leds/vibrator"
+strength = { lightest = 0.25, strongest = 0.75 }

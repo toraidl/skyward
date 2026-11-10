@@ -936,6 +936,11 @@ impl Pick {
 
     /// The slots this means on a phone running from `current`.
     pub fn slots(self, current: Slot) -> Vec<Slot> {
+        // A phone laid out once has one partition of each kind, whatever
+        // the picker would have said on an A/B one.
+        if current == Slot::Single {
+            return vec![Slot::Single];
+        }
         match self {
             Pick::Current => vec![current],
             Pick::Other => vec![current.other()],
@@ -8042,7 +8047,8 @@ mod tests {
 
     #[test]
     fn an_image_goes_where_it_is_sent_once_swiped() {
-        let (f, i) = (fonts(), info());
+        let (f, mut i) = (fonts(), info());
+        i.slot = Some(Slot::A);
         let mut app = sideloading(&f, &i);
         app.install(Event::Checking { size: 201_326_592 }, 0);
         let kind = ImageKind::Boot { kernel: true, ramdisk: skyward_install::Ramdisk::Recovery };
@@ -8067,6 +8073,28 @@ mod tests {
         app.key(Key::Back, 2000);
         assert_eq!(app.screen(), Screen::Install);
         assert_eq!(app.state.install, Install::Idle);
+    }
+
+    #[test]
+    fn a_phone_laid_out_once_offers_no_slot_to_choose() {
+        // No slot in its device information: a phone whose partitions carry
+        // no suffix, as the OPPO Find X3's do.
+        let (f, i) = (fonts(), info());
+        let mut app = sideloading(&f, &i);
+        app.install(Event::Checking { size: 4096 }, 0);
+        let kind = ImageKind::Boot { kernel: true, ramdisk: skyward_install::Ramdisk::Recovery };
+        app.install(Event::Image { kind, size: 4096, partitions: vec!["recovery"] }, 0);
+        let frame = app.frame(&f, &i);
+        assert!(frame.hits.iter().all(|h| !matches!(h.action, Action::FlashSlots(_))), "there is no slot to choose");
+        let track = frame.hits.iter().find(|h| h.action == Action::Confirm(Confirm::Flash)).expect("the swipe to flash").rect;
+        let y = track.centre().1 - app.top().1;
+        app.touch(Touch::Down(track.x + track.h / 2.0, y), &f, 1000);
+        app.touch(Touch::Move(track.x + track.w, y), &f, 1000);
+        assert_eq!(
+            app.touch(Touch::Up, &f, 1000),
+            vec![Effect::Flash { partition: "recovery", pick: Pick::Current }],
+            "the one layout receives the image"
+        );
     }
 
     #[test]

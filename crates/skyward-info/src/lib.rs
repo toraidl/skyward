@@ -156,7 +156,9 @@ pub fn collect(cfg: &DeviceConfig) -> Result<DeviceInfo> {
         kernel: kernel_release()?,
         storage: storage()?,
         battery: battery(Path::new(POWER_SUPPLY))?,
-        slot: skyward_vab::current_slot()?,
+        // A phone laid out once has a single layout, not slots: its pages
+        // show no slot to start from and no update to switch to.
+        slot: skyward_vab::current_slot()?.filter(|slot| *slot != skyward_vab::Slot::Single),
         snapshot: skyward_vab::snapshot_state()?,
         boot: Boot { unlocked, verified: skyward_block::boot_param("androidboot.verifiedbootstate")? },
     })

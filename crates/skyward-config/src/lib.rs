@@ -348,6 +348,11 @@ impl Default for Modules {
 /// something before a recovery can read touches from it.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct Touch {
+    /// Input devices that carry the panel's name but no touches of their
+    /// own, such as OPPO's and OnePlus's `hbtp_vm` mirror. They are left
+    /// out, so the panel itself is the one read.
+    #[serde(default)]
+    pub skip: Vec<String>,
     /// What is written once the touchscreen's input device has appeared,
     /// each value to its file: the driver makes that device as the last
     /// step of starting the controller.
@@ -573,6 +578,9 @@ impl DeviceConfig {
             let plain = path.components().all(|c| matches!(c, std::path::Component::Normal(_)));
             ensure!(plain && !folder.is_empty(), "[backup] data_skipped: {folder} is not a path from the top of {DATA}");
         }
+        for name in &cfg.touch.skip {
+            ensure!(!name.is_empty(), "[touch] skip: an input device's name is empty");
+        }
         if let Some(haptics) = &cfg.haptics {
             match (&haptics.led, haptics.click.is_some(), haptics.resonance.is_some()) {
                 (Some(_), false, false) => {}
@@ -697,6 +705,37 @@ mod tests {
         let haptics = cfg.haptics.expect("the 13 Ultra has a motor");
         assert_eq!((haptics.click, haptics.resonance), (Some(0), None));
         assert_eq!(haptics.strength, Strength { lightest: 0.5, strongest: 1.0 });
+    }
+
+    #[test]
+    fn the_find_x3_lays_its_partitions_out_once() {
+        let cfg = DeviceConfig::parse(include_str!("../../../devices/op4e5d.toml")).unwrap();
+        assert!(!cfg.device.ab, "the Find X3 has one layout, not slots");
+        assert!(cfg.partitions.ab_ota.is_empty(), "an A-only phone has no A/B OTA partitions");
+        assert_eq!(cfg.touch.skip, ["hbtp_vm"], "the virtual touch device carries the panel's name but no touches");
+        assert_eq!(cfg.partitions.mounted, ["metadata", "persist"]);
+        assert_eq!((cfg.display.width, cfg.display.height, cfg.display.density), (1080, 2412, 480));
+        assert_eq!(cfg.display.status_bar_left_inset, 189, "the clock clears the top-left cutout");
+        let paths: Vec<&str> = cfg.services.iter().map(|s| s.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "/system/bin/hwservicemanager",
+                "/system/bin/qseecomd",
+                "/system/bin/android.hardware.keymaster@4.1-service-qti",
+                "/system/bin/android.hardware.gatekeeper@1.0-service-qti",
+                "/system/bin/hw/vendor.oplus.hardware.cryptoeng@1.0-service",
+            ],
+            "the secure services start in the order they depend on one another"
+        );
+        assert_eq!(
+            cfg.services[4].ready_hardware_service.as_deref(),
+            Some("vendor.oplus.hardware.cryptoeng@1.0::ICryptoeng/default")
+        );
+        let wlan = cfg.wlan.expect("the Find X3's WLAN is brought up");
+        assert_eq!(wlan.interface, "wlan0");
+        assert!(wlan.firmware.iter().any(|f| f.name == "bdwlan.elf"), "the board data is staged");
+        assert!(wlan.modules.is_empty(), "the recovery kernel carries the QCA6390 driver");
     }
 
     #[test]

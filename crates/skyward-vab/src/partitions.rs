@@ -106,7 +106,12 @@ fn map_and_mount(p: &Partition, devices: &[(u32, u32)], slot: Slot) -> Result<Mo
 fn slot_partitions(md: &Metadata, slot: Slot) -> Vec<&Partition> {
     md.partitions
         .iter()
-        .filter(|p| p.name.ends_with(slot.suffix()) && !p.extents.is_empty() && p.attributes & ATTR_DISABLED == 0)
+        .filter(|p| {
+            p.name.ends_with(slot.suffix())
+                && !p.name.ends_with("-cow")
+                && !p.extents.is_empty()
+                && p.attributes & ATTR_DISABLED == 0
+        })
         .collect()
 }
 

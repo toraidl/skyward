@@ -266,8 +266,10 @@ fn main() -> Result<()> {
         Cmd::Umount => skyward_vab::unmount_partitions(booted_slot()?),
         #[cfg(target_os = "android")]
         Cmd::Services { config } => {
+            let cfg = DeviceConfig::load(&config)?;
+            adopt_layout(&cfg);
             let props = skyward_info::installed_props(booted_slot()?)?;
-            let mut services = DeviceConfig::load(&config)?.services;
+            let mut services = cfg.services;
             services.retain(|s| s.runs_on(&props));
             services::start(&services, secure::libraries()?.as_deref())?;
             loop {
@@ -421,10 +423,18 @@ fn main() -> Result<()> {
         #[cfg(target_os = "android")]
         Cmd::Ui { config, font, mono, unlock, dump } => {
             let cfg = DeviceConfig::load(&config)?;
+            adopt_layout(&cfg);
             let start = if unlock { skyward_ui::app::Screen::Decrypt } else { skyward_ui::app::Screen::Home };
             ui::run(&cfg, &font, &mono, bcb::Request::default(), start, dump.as_deref())
         }
     }
+}
+
+/// Tell the rest of the recovery how this phone names its partitions: a
+/// phone whose configuration says it is not A/B lays them out once, under
+/// names without a slot.
+fn adopt_layout(cfg: &DeviceConfig) {
+    skyward_vab::set_single_layout(!cfg.device.ab);
 }
 
 fn booted_slot() -> Result<skyward_vab::Slot> {
@@ -497,15 +507,19 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
     // the slot; the partitions this phone keeps once need a name in each.
     // The update engine reads the phone's own directory, not the one the
     // recovery made, so both get the names.
-    let mut named = 0;
-    for dir in [skyward_block::BY_NAME, skyward_block::BOOT_BY_NAME] {
-        match skyward_block::link_slots(dir) {
-            Ok(made) => named += made,
-            Err(e) => skyward_sys::kmsg(&format!("slot names not given under {dir}: {e:#}"))?,
+    // A phone laid out once has no second slot for those names to stand
+    // for, and its update engine looks partitions up as they are.
+    if !skyward_vab::single_layout() {
+        let mut named = 0;
+        for dir in [skyward_block::BY_NAME, skyward_block::BOOT_BY_NAME] {
+            match skyward_block::link_slots(dir) {
+                Ok(made) => named += made,
+                Err(e) => skyward_sys::kmsg(&format!("slot names not given under {dir}: {e:#}"))?,
+            }
         }
-    }
-    if named > 0 {
-        skyward_sys::kmsg(&format!("{named} slot names given to partitions the phone keeps once"))?;
+        if named > 0 {
+            skyward_sys::kmsg(&format!("{named} slot names given to partitions the phone keeps once"))?;
+        }
     }
     // The installed system's own version tells the secure world which build
     // made the keys it is asked about. It is not what lets the secure world
@@ -721,6 +735,7 @@ fn recovery() -> Result<()> {
             bcb::clear(&misc)?;
         }
         let cfg = DeviceConfig::load(Path::new("/").join(ramdisk::CONFIG))?;
+        adopt_layout(&cfg);
         skyward_sys::kmsg(&format!(
             "{} {} recovery up, misc command {:?} args {:?}, asking for {:?}",
             cfg.device.codename,
@@ -807,6 +822,7 @@ fn prepare(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
 
 fn info(config: &str) -> Result<()> {
     let cfg = DeviceConfig::load(config)?;
+    adopt_layout(&cfg);
     let i = skyward_info::collect(&cfg)?;
     println!("model         = {} ({})", i.model, i.codename);
     println!("soc           = {:?}", i.soc);

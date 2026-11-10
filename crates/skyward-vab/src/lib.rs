@@ -3,6 +3,7 @@ use prost::Message;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(target_os = "android")]
 pub mod boot;
@@ -20,6 +21,11 @@ pub use snapshots::Merge;
 pub enum Slot {
     A,
     B,
+    /// A phone that lays its partitions out once, without slots: super's
+    /// metadata and its partitions carry no `_a` or `_b`, and the
+    /// bootloader has no slot to switch to. OnePlus's and OPPO's older
+    /// A-only builds are laid out this way.
+    Single,
 }
 
 impl Slot {
@@ -27,6 +33,7 @@ impl Slot {
         match self {
             Slot::A => "_a",
             Slot::B => "_b",
+            Slot::Single => "",
         }
     }
 
@@ -34,6 +41,7 @@ impl Slot {
         match self {
             Slot::A => "A",
             Slot::B => "B",
+            Slot::Single => "",
         }
     }
 
@@ -42,6 +50,7 @@ impl Slot {
         match self {
             Slot::A => 0,
             Slot::B => 1,
+            Slot::Single => 0,
         }
     }
 
@@ -49,6 +58,8 @@ impl Slot {
         match self {
             Slot::A => Slot::B,
             Slot::B => Slot::A,
+            // There is no other layout to switch to.
+            Slot::Single => Slot::Single,
         }
     }
 
@@ -56,9 +67,29 @@ impl Slot {
         match s {
             "_a" => Some(Slot::A),
             "_b" => Some(Slot::B),
+            "" => Some(Slot::Single),
             _ => None,
         }
     }
+}
+
+/// Whether this recovery runs on a phone that lays its partitions out once.
+/// The recovery sets this from the device configuration before anything
+/// reads a slot: the bootloader of such a phone names no slot, and without
+/// this every read of one would say the phone is not A/B and the recovery
+/// would stop before it showed a page.
+static SINGLE_LAYOUT: AtomicBool = AtomicBool::new(false);
+
+/// Tell the rest of the recovery how this phone names its partitions. Set
+/// once, from `[device] ab`.
+pub fn set_single_layout(single: bool) {
+    SINGLE_LAYOUT.store(single, Ordering::Relaxed);
+}
+
+/// Whether the phone lays its partitions out once, as [`Slot::Single`]
+/// says.
+pub fn single_layout() -> bool {
+    SINGLE_LAYOUT.load(Ordering::Relaxed)
 }
 
 /// What the phone's boot control holds of the slots.
@@ -76,9 +107,12 @@ pub struct BootSlots {
     pub successful: [bool; 2],
 }
 
-/// The booted slot, or `None` on devices that are not A/B.
+/// The booted slot, or `None` on devices that are not A/B. A phone whose
+/// configuration says its partitions carry no slot gets [`Slot::Single`],
+/// which names them as they are.
 pub fn current_slot() -> Result<Option<Slot>> {
     match skyward_block::slot_suffix()? {
+        None if single_layout() => Ok(Some(Slot::Single)),
         None => Ok(None),
         Some(s) => Slot::from_suffix(&s).map(Some).ok_or_else(|| anyhow!("slot suffix {s:?}")),
     }
@@ -404,10 +438,12 @@ mod tests {
     #[test]
     fn slot_round_trip() {
         assert_eq!(Slot::from_suffix("_a"), Some(Slot::A));
+        assert_eq!(Slot::from_suffix(""), Some(Slot::Single));
         assert_eq!(Slot::A.other(), Slot::B);
         assert_eq!(Slot::B.suffix(), "_b");
         assert_eq!(Slot::B.letter(), "B");
         assert_eq!((Slot::A.number(), Slot::B.number()), (0, 1));
+        assert_eq!((Slot::Single.suffix(), Slot::Single.number(), Slot::Single.other()), ("", 0, Slot::Single));
         assert_eq!(Slot::from_suffix("_c"), None);
     }
 

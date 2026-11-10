@@ -1170,7 +1170,7 @@ pub fn run(cfg: &DeviceConfig, font: &Path, mono: &Path, request: bcb::Request, 
             Err(e) => eprintln!("About hero art: {e}"),
         }
     }
-    let mut inputs = Inputs::open(w, h, cfg.touch.writes.clone())?;
+    let mut inputs = Inputs::open(w, h, cfg.touch.writes.clone(), cfg.touch.skip.clone())?;
     let started = Instant::now();
     let mut touch_known = false;
     // adbd and fastbootd ask over it to go over to fastboot and back.

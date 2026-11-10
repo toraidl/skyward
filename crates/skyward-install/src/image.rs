@@ -161,12 +161,14 @@ pub fn device(dir: &Path, name: &str, slot: Slot) -> PathBuf {
 }
 
 /// The partitions `kind` fits that this phone has in both slots, among the
-/// links in `dir`, the likeliest first.
+/// links in `dir`, the likeliest first. A phone laid out once has one of
+/// each, under a name without a slot.
 pub fn partitions(kind: ImageKind, dir: &Path) -> Result<Vec<&'static str>> {
+    let slots: &[Slot] = if skyward_vab::single_layout() { &[Slot::Single] } else { &[Slot::A, Slot::B] };
     let mut found = Vec::new();
     for name in kind.partitions() {
         let mut has = true;
-        for slot in [Slot::A, Slot::B] {
+        for &slot in slots {
             let path = device(dir, name, slot);
             has &= path.try_exists().with_context(|| format!("look for {}", path.display()))?;
         }

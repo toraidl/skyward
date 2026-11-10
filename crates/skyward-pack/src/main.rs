@@ -51,6 +51,12 @@ enum Cmd {
         /// phone or a full update package holds it, ending in its AVB footer.
         #[arg(long)]
         stock: PathBuf,
+        /// The image is another recovery's, such as OrangeFox's, not the
+        /// phone's stock one: its theme, tools and init stay, and only the
+        /// recovery program becomes Skyward. Use it when the phone's stock
+        /// recovery is not at hand.
+        #[arg(long)]
+        third_party: bool,
         /// Replace the stock kernel with a bare arm64 Image or an image
         /// holding one, while keeping the stock ramdisk, DTBO and DTB.
         #[arg(long)]
@@ -129,7 +135,22 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read_kernel(&kernel)?;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, kernel, binary, logd, update_engine_root, libraries, config, font, hero, mono, mono_license, diagnostics, out } => {
+        Cmd::Recovery {
+            stock,
+            third_party,
+            kernel,
+            binary,
+            logd,
+            update_engine_root,
+            libraries,
+            config,
+            font,
+            hero,
+            mono,
+            mono_license,
+            diagnostics,
+            out,
+        } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
             if let Some(kernel) = kernel {
@@ -137,9 +158,12 @@ fn main() -> Result<()> {
             }
             let mut rd = Ramdisk::decode(&img.ramdisk)?;
             // A stock recovery ramdisk has no third-party tree; refuse to build
-            // on top of another custom recovery.
-            if let Some(e) = rd.entries.iter().find(|e| e.name == "FFiles" || e.name.starts_with("twres")) {
-                anyhow::bail!("{} holds {}, which is not a stock recovery", stock.display(), e.name);
+            // on top of another custom recovery unless the caller says the
+            // base is that custom recovery on purpose.
+            if !third_party {
+                if let Some(e) = rd.entries.iter().find(|e| e.name == "FFiles" || e.name.starts_with("twres")) {
+                    anyhow::bail!("{} holds {}, which is not a stock recovery", stock.display(), e.name);
+                }
             }
             let read = |p: &PathBuf| std::fs::read(p).with_context(|| format!("read {}", p.display()));
             let device = skyward_config::DeviceConfig::load(&config)?;
