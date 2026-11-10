@@ -166,6 +166,12 @@ enum Cmd {
         #[arg(long)]
         unwrap: bool,
     },
+    /// Report the older hardware key service and unwrap a key it holds.
+    #[cfg(target_os = "android")]
+    Keymaster {
+        #[arg(long, default_value = "/metadata/vold/metadata_encryption/key")]
+        key: PathBuf,
+    },
     /// Say what the phone's credential service answers, which takes no
     /// credential and changes nothing.
     #[cfg(target_os = "android")]
@@ -351,6 +357,23 @@ fn main() -> Result<()> {
             for (tag, value) in stored.authorizations(&service)? {
                 println!("  tag {tag} = {value}");
             }
+            let raw = stored.unwrap(skyward_crypto::keystore::Unwrap::Hardware(&service))?;
+            println!("{} holds a key of {} bytes", key.display(), raw.len());
+            Ok(())
+        }
+        #[cfg(target_os = "android")]
+        Cmd::Keymaster { key } => {
+            let hardware = skyward_binder::driver::Binder::hardware()?;
+            let service = skyward_crypto::keymaster::Keymaster::open(&hardware)?;
+            let hw = service.hardware()?;
+            println!(
+                "{} {} at security level {} by {}",
+                service.interface(),
+                hw.name,
+                hw.security_level,
+                hw.author
+            );
+            let stored = skyward_crypto::keystore::StoredKey::load(&key)?;
             let raw = stored.unwrap(skyward_crypto::keystore::Unwrap::Hardware(&service))?;
             println!("{} holds a key of {} bytes", key.display(), raw.len());
             Ok(())
@@ -697,17 +720,31 @@ fn mount_firmware(partition: &str) -> Result<()> {
 #[cfg(target_os = "android")]
 const BUILD_VERSION: [&str; 3] = ["ro.build.version.release", "ro.build.version.security_patch", "ro.vendor.build.security_patch"];
 
-/// Set each of [`BUILD_VERSION`] to the installed system's value. An earlier
-/// run of the recovery service may have set it already, and init sets such
-/// a property only once.
+/// Set each of [`BUILD_VERSION`] from the installed system. The key service
+/// also reads the vendor patch from here, and a key made under a newer
+/// system build must not look like a downgrade to it. An earlier run of the
+/// recovery service may have set a property already, and init sets such a
+/// property only once.
 #[cfg(target_os = "android")]
 fn adopt_installed_version(props: &std::collections::HashMap<String, String>) -> Result<()> {
-    for name in BUILD_VERSION {
-        let value = props.get(name).with_context(|| format!("the installed system says no {name}"))?;
-        if skyward_sys::prop(name).as_ref() != Some(value) {
+    let release = props.get(BUILD_VERSION[0]).with_context(|| format!("the installed system says no {}", BUILD_VERSION[0]))?;
+    let system_patch = props.get(BUILD_VERSION[1]).with_context(|| format!("the installed system says no {}", BUILD_VERSION[1]))?;
+    let vendor_patch = props.get(BUILD_VERSION[2]).with_context(|| format!("the installed system says no {}", BUILD_VERSION[2]))?;
+    // The key service reads the vendor patch level from this property. A
+    // key made by a build whose system patch is newer than the vendor
+    // property would otherwise look like a downgrade and its upgrade is
+    // refused. Keystore's own recovery environments keep the property at
+    // least as new as the system patch for this reason.
+    let vendor_for_keymaster = if system_patch > vendor_patch { system_patch } else { vendor_patch };
+    for (name, value) in [
+        (BUILD_VERSION[0], release.as_str()),
+        (BUILD_VERSION[1], system_patch.as_str()),
+        (BUILD_VERSION[2], vendor_for_keymaster),
+    ] {
+        if skyward_sys::prop(name).as_ref().map(String::as_str) != Some(value) {
             skyward_sys::set_prop(name, value)?;
         }
-        skyward_sys::kmsg(&format!("{name} is the installed system's {value}"))?;
+        skyward_sys::kmsg(&format!("{name} is set to {value} from the installed system"))?;
     }
     Ok(())
 }

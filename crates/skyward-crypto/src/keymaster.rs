@@ -58,6 +58,7 @@ const TAG_BLOCK_MODE: i32 = 536_870_916;
 const TAG_PADDING: i32 = 536_870_918;
 const TAG_MAC_LENGTH: i32 = 805_307_371;
 const TAG_APPLICATION_ID: i32 = -1_879_047_591;
+const TAG_APPLICATION_DATA: i32 = -1_879_047_492;
 const TAG_NONCE: i32 = -1_879_047_191;
 
 const PADDING_NONE: u64 = 1;
@@ -178,11 +179,12 @@ impl<'a> Keymaster<'a> {
             Err(e) if refusal(&e) == Some(KEY_REQUIRES_UPGRADE) => {
                 // The phone's firmware has moved on since this key was made.
                 // Renewing it gives a key for the firmware running now; the
-                // one on disk is left as it is. A renewal names nothing: the
-                // key blob already carries what it is bound to, and the
-                // service refuses a decryption's parameters in a renewal.
-                // keystore2 renews with an empty set for the same reason.
-                let renewed = self.upgrade(key_blob, &[]).context("renew the key for the firmware running now")?;
+                // one on disk is left as it is. A renewal takes the
+                // binding the key was made with, not the operation that
+                // refused it: the application id, and no nonce or cipher
+                // mode, which belong to the decryption instead.
+                let params = Self::binding(app_id);
+                let renewed = self.upgrade(key_blob, &params).context("renew the key for the firmware running now")?;
                 self.begin(&renewed, app_id, nonce, note)?
             }
             Err(e) => return Err(e),
@@ -211,6 +213,17 @@ impl<'a> Keymaster<'a> {
             params.push(Param { tag: TAG_APPLICATION_ID, value: None, blob: Some(app_id) });
         }
         params.push(Param { tag: TAG_NONCE, value: None, blob: Some(nonce) });
+        params
+    }
+
+    /// What a renewal is told: the application id the key is bound to,
+    /// and nothing about how a particular operation uses it.
+    fn binding(app_id: &[u8]) -> Vec<Param<'_>> {
+        let mut params = Vec::new();
+        if !app_id.is_empty() {
+            params.push(Param { tag: TAG_APPLICATION_ID, value: None, blob: Some(app_id) });
+        }
+        params.push(Param { tag: TAG_APPLICATION_DATA, value: None, blob: Some(&[]) });
         params
     }
 

@@ -151,7 +151,9 @@ fn main() -> Result<()> {
             diagnostics,
             out,
         } => {
+            let stock_bytes = std::fs::read(&stock).with_context(|| format!("read {}", stock.display()))?;
             let size = partition_size(&stock)?;
+            let stock_header = avb::header(&stock_bytes).with_context(|| format!("read the AVB header of {}", stock.display()))?;
             let mut img = BootImage::read(&stock)?;
             if let Some(kernel) = kernel {
                 img.kernel = BootImage::read_kernel(&kernel)?;
@@ -245,7 +247,7 @@ fn main() -> Result<()> {
             }
             img.ramdisk = rd.encode()?;
             let bytes = img.to_bytes()?;
-            write(&out, &img, &avb::footed(&bytes, "recovery", size, &Sha256::digest(&bytes))?)
+            write(&out, &img, &avb::footed_with(&bytes, "recovery", size, &Sha256::digest(&bytes), &stock_header)?)
         }
         Cmd::Stock { config, out } => {
             let stock = skyward_config::DeviceConfig::load(&config)?.stock.with_context(|| format!("{} names no stock build", config.display()))?;

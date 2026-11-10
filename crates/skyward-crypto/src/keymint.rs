@@ -46,6 +46,7 @@ const TAG_BLOCK_MODE: i32 = 536_870_916;
 const TAG_PADDING: i32 = 536_870_918;
 const TAG_MAC_LENGTH: i32 = 805_307_371;
 const TAG_APPLICATION_ID: i32 = -1_879_047_591;
+const TAG_APPLICATION_DATA: i32 = -1_879_047_492;
 const TAG_NONCE: i32 = -1_879_047_191;
 
 /// Which arm of a parameter's value is used.
@@ -221,11 +222,13 @@ impl<'a> KeyMintDevice<'a> {
                 // The phone's firmware has moved on since this key was
                 // made. Renewing it gives a key for the firmware running
                 // now; the one on disk is left as it is, so nothing of the
-                // phone's own is changed by reading it here. A renewal names
-                // nothing: the key blob already carries what it is bound to,
-                // and a decryption's parameters are not a renewal's to send.
-                // keystore2 renews with an empty set for the same reason.
-                let renewed = self.upgrade(key_blob, |call| call.i32(0)).context("renew the key for the firmware running now")?;
+                // phone's own is changed by reading it here. A renewal takes
+                // the binding the key was made with, not the operation that
+                // refused it: the application id, and no nonce or cipher
+                // mode, which belong to the decryption instead.
+                let renewed = self
+                    .upgrade(key_blob, |call| Self::renewal_params(call, app_id))
+                    .context("renew the key for the firmware running now")?;
                 self.begin(&renewed, app_id, nonce, note)?
             }
             Err(e) => return Err(e),
@@ -254,6 +257,16 @@ impl<'a> KeyMintDevice<'a> {
         }
         parameter(call, TAG_NONCE, Value::Blob(nonce));
         parameter(call, TAG_PURPOSE, Value::Enum(VALUE_KEY_PURPOSE, PURPOSE_DECRYPT));
+    }
+
+    /// What a renewal is told: the application id the key is bound to,
+    /// and nothing about how a particular operation uses it.
+    fn renewal_params(call: &mut Parcel, app_id: &[u8]) {
+        call.i32(if app_id.is_empty() { 1 } else { 2 });
+        if !app_id.is_empty() {
+            parameter(call, TAG_APPLICATION_ID, Value::Blob(app_id));
+        }
+        parameter(call, TAG_APPLICATION_DATA, Value::Blob(&[]));
     }
 
     /// Open a decryption with the key service and keep hold of it.
