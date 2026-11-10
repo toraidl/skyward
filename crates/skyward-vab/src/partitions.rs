@@ -5,6 +5,8 @@ use skyward_block::{devnum, dm, mount, BY_NAME};
 use skyward_lp::{Extent, Metadata, Partition, ATTR_DISABLED};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::{Duration, Instant};
 
 /// A logical partition of super, mapped and mounted read-only.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,6 +136,14 @@ fn ensure_no_snapshot() -> Result<()> {
 /// merge is under way. A partition an earlier run of the recovery service
 /// mounted, and that still shows, is taken as it is.
 pub fn mount_partitions(slot: Slot) -> Result<Mounts> {
+    mount_partitions_except(slot, &[])
+}
+
+/// As [`mount_partitions`], leaving the named logical partitions unmapped
+/// and unmounted. A script OTA that reshapes the dynamic partition group
+/// needs this for `system`: it removes the group itself and makes the
+/// partitions anew.
+pub fn mount_partitions_except(slot: Slot, skip: &[String]) -> Result<Mounts> {
     let metadata = Path::new(METADATA);
     if !mount::is_mount_point(metadata)? {
         mount::mount_ro(&Path::new(BY_NAME).join("metadata"), metadata)?;
@@ -150,6 +160,9 @@ pub fn mount_partitions(slot: Slot) -> Result<Mounts> {
     let shown = mounted_partitions(slot)?;
     let mut mounts = Mounts { partitions: Vec::new(), damaged: md.damaged.clone(), skipped: Vec::new() };
     for p in slot_partitions(&md, slot) {
+        if skip.iter().any(|name| base(p, slot) == name) {
+            continue;
+        }
         if let Some(m) = shown.iter().find(|m| m.partition == p.name) {
             mounts.partitions.push(m.clone());
             continue;
@@ -436,6 +449,45 @@ pub fn release_partitions(slot: Slot, busy: &[PathBuf]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Take the slot's dynamic partitions all the way out of device-mapper
+/// before a stock install script calls `update_dynamic_partitions`. The
+/// script must remove the old group itself, and it cannot while any of the
+/// partitions in it is still mapped. A just-detached mount can keep its
+/// device busy for a moment, so give the last references time to go.
+pub fn release_script_mappings(slot: Slot) -> Result<()> {
+    let md = skyward_lp::read(&super_device(), slot.number())?;
+    for p in slot_partitions(&md, slot) {
+        release_one(p, slot)?;
+    }
+    Ok(())
+}
+
+/// Detach and unmap one logical partition by its base name, after the
+/// recovery has read and started what needs it.
+pub fn release_partition(slot: Slot, base_name: &str) -> Result<()> {
+    let md = skyward_lp::read(&super_device(), slot.number())?;
+    let p = slot_partitions(&md, slot)
+        .into_iter()
+        .find(|p| base(p, slot) == base_name)
+        .with_context(|| format!("super holds no {base_name}"))?;
+    release_one(p, slot)
+}
+
+fn release_one(p: &Partition, slot: Slot) -> Result<()> {
+    let point = mount_point(base(p, slot));
+    if mount::visible(&point)?.is_some() {
+        mount::umount_detach_over(&point)?;
+    }
+    let until = Instant::now() + Duration::from_secs(20);
+    loop {
+        match snapshots::unmap_snapshot(&p.name) {
+            Ok(()) => return Ok(()),
+            Err(e) if busy_error(&e) && Instant::now() < until => thread::sleep(Duration::from_millis(100)),
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 fn busy_error(error: &anyhow::Error) -> bool {

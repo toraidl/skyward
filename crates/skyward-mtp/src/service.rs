@@ -26,9 +26,6 @@ const READY: &str = "sys.usb.ffs.mtp.ready";
 /// How long the phone waits for the thread to give a storage back.
 const GIVE_BACK: Duration = Duration::from_secs(10);
 
-/// How long init may take to hand the port to adb alone.
-const PORT_SWITCH: Duration = Duration::from_secs(5);
-
 enum Message {
     /// Offer this storage, or none; the sender hears once nothing is under
     /// way in the storage offered before.
@@ -93,14 +90,10 @@ impl Service {
                 let served = serve(&mut port, responder, mail);
                 if let Err(e) = &served {
                     let _ = kmsg(&format!("mtp: file transfer stops: {e:#}"));
-                    // The port loses the function with its descriptors, and
-                    // with it adb, unless it offers adb alone first.
+                    // The page owns the port. Let its Transfer::stop switch
+                    // the port once this thread has ended; switching here as
+                    // well races another unbind and can leave adbd unbound.
                     skyward_sys::usb::set_mtp(false);
-                    if skyward_sys::prop("sys.usb.state").as_deref() == Some("mtp,adb") {
-                        if let Err(e) = skyward_sys::usb::switch("adb", PORT_SWITCH) {
-                            let _ = kmsg(&format!("mtp: the port kept file transfer: {e:#}"));
-                        }
-                    }
                 }
                 drop(port);
                 served

@@ -535,7 +535,7 @@ fn restore(t: RestoreTask, tell: &dyn Fn(Event), cancel: &AtomicBool) -> Result<
         }
     }
     if system {
-        (t.detach)().context("take the slot's partitions off before writing over them")?;
+        (t.detach)(false).context("take the slot's partitions off before writing over them")?;
     }
     // Once anything is written, the restore goes on to its end.
     let go_on = AtomicBool::new(false);

@@ -144,7 +144,13 @@ pub fn prepare_hardware_directory(wanted: &[String]) -> Result<()> {
     // are given the modes the system's own copies have.
     fs::set_permissions(RECOVERY_LABELS, std::os::unix::fs::PermissionsExt::from_mode(0o755))
         .with_context(|| format!("open {RECOVERY_LABELS} to every user"))?;
-    fs::copy(from, &into).with_context(|| format!("copy {} to {}", from.display(), into.display()))?;
+    if from.is_file() {
+        fs::copy(from, &into).with_context(|| format!("copy {} to {}", from.display(), into.display()))?;
+    } else if into.is_file() {
+        skyward_sys::kmsg(&format!("{} is not mounted; using the recovery's service labels", from.display()))?;
+    } else {
+        anyhow::bail!("neither {} nor {} describes the hardware services", from.display(), into.display());
+    }
     fs::write(RECOVERY_MANIFEST, describe_hardware(wanted)?).with_context(|| format!("write {RECOVERY_MANIFEST}"))?;
     fs::set_permissions(RECOVERY_MANIFEST, std::os::unix::fs::PermissionsExt::from_mode(0o644))
         .with_context(|| format!("let every user read {RECOVERY_MANIFEST}"))?;

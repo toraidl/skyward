@@ -835,7 +835,12 @@ fn recovery() -> Result<()> {
 /// after it is wiped, so the reason goes to the kernel log instead.
 #[cfg(target_os = "android")]
 fn prepare(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<()> {
-    match skyward_vab::mount_partitions(slot) {
+    for (name, value) in &cfg.properties {
+        if skyward_sys::prop(name).as_ref().map(String::as_str) != Some(value) {
+            skyward_sys::set_prop(name, value)?;
+        }
+    }
+    match skyward_vab::mount_partitions_except(slot, &cfg.partitions.skip_mount) {
         Ok(mounts) => {
             for d in &mounts.damaged {
                 skyward_sys::kmsg(&format!("super: {d}"))?;

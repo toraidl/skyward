@@ -1071,8 +1071,16 @@ fn detach(cfg: &DeviceConfig) -> Detach {
     // supervisor, but its vendor executable and libraries need the same
     // protection while an install releases the mounted system.
     programs.extend(cfg.wlan.iter().map(|w| w.supplicant.clone()));
-    Box::new(move || {
+    Box::new(move |stop_services| {
         let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
+        if stop_services {
+            services::stop(&programs)?;
+            // Pinning keeps a file mapped for the rest of this process, and
+            // the device it came from busy. A stock script OTA removes the
+            // whole dynamic partition group, so it cannot run alongside a
+            // pin even after the services themselves have stopped.
+            return skyward_vab::release_partitions(slot, &[]);
+        }
         let mounted = skyward_vab::mounted_partitions(slot)?;
         let busy = services::pin(&programs, &mounted)?;
         skyward_vab::release_partitions(slot, &busy)

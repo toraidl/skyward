@@ -55,6 +55,10 @@ pub struct DeviceConfig {
     pub touch: Touch,
     #[serde(default)]
     pub partitions: Partitions,
+    /// Read-only properties a recovery must set itself, where the installed
+    /// system is deliberately left unmapped.
+    #[serde(default)]
+    pub properties: HashMap<String, String>,
     /// Where the firmware the phone's drivers ask for is, on phones whose
     /// recovery leaves it out of their reach.
     #[serde(default)]
@@ -368,6 +372,12 @@ pub struct Partitions {
     /// them starts.
     #[serde(default)]
     pub mounted: Vec<String>,
+    /// Logical partitions the recovery leaves unmapped at startup. A
+    /// script OTA that changes the dynamic partition group has to map
+    /// these itself; keeping them mapped makes the group impossible to
+    /// remove.
+    #[serde(default)]
+    pub skip_mount: Vec<String>,
     /// The installed build's A/B OTA partition list, also used to preserve
     /// partitions absent from a partial payload. Published in the ramdisk
     /// as ro.product.ab_ota_partitions before update_engine starts.
@@ -551,6 +561,12 @@ impl DeviceConfig {
         }
         for name in &cfg.partitions.mounted {
             ensure!(!name.is_empty() && !name.contains('/'), "[partitions] mounted: {name} is not a partition's name");
+        }
+        for name in &cfg.partitions.skip_mount {
+            ensure!(
+                !name.is_empty() && !name.contains('/'),
+                "[partitions] skip_mount: {name} is not a partition's name"
+            );
         }
         ensure!(cfg.device.ab || cfg.partitions.ab_ota.is_empty(), "[partitions] ab_ota requires an A/B device");
         for name in &cfg.partitions.ab_ota {

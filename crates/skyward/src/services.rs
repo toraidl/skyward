@@ -10,6 +10,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -25,6 +26,10 @@ const RESTART_DELAY_LONGEST: Duration = Duration::from_secs(30);
 /// How long a program gets to become what it says it will be.
 const READY_TIMEOUT: Duration = Duration::from_secs(20);
 const READY_POLL: Duration = Duration::from_millis(100);
+
+/// Set once an install is about to reshape the partitions the services run
+/// from. Their supervisors leave instead of starting them again.
+static STOPPING: AtomicBool = AtomicBool::new(false);
 
 /// Where the kernel says the highest capability it knows.
 const CAP_LAST_CAP: &str = "/proc/sys/kernel/cap_last_cap";
@@ -66,6 +71,35 @@ pub fn start(services: &[Service], libraries: Option<&Path>) -> Result<()> {
         ready(&waiting)?;
     }
     Ok(())
+}
+
+/// Stop the programs that run from the slot's partitions and keep their
+/// supervisors from starting them again. A script OTA removes the dynamic
+/// partition group, which the kernel refuses while any program still has
+/// a file on one of those partitions open.
+pub fn stop(programs: &[String]) -> Result<()> {
+    STOPPING.store(true, Ordering::SeqCst);
+    for path in programs {
+        if let Some(pid) = running(path) {
+            let _ = skyward_sys::kmsg(&format!("stopping {path} (pid {pid}) for an install"))?;
+            unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+        }
+    }
+    let until = Instant::now() + Duration::from_secs(5);
+    loop {
+        let left: Vec<(String, u32)> = programs.iter().filter_map(|p| running(p).map(|pid| (p.clone(), pid))).collect();
+        if left.is_empty() {
+            return Ok(());
+        }
+        if Instant::now() >= until {
+            for (path, pid) in left {
+                let _ = skyward_sys::kmsg(&format!("killing {path} (pid {pid}) for an install"))?;
+                unsafe { libc::kill(pid as libc::pid_t, libc::SIGKILL) };
+            }
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
 }
 
 /// Who a program runs as and what of root's it keeps, as the phone's own
@@ -194,9 +228,12 @@ fn ready(s: &Service) -> Result<()> {
     }
 }
 
-fn supervise(s: &Service, who: &Credentials) -> ! {
+fn supervise(s: &Service, who: &Credentials) {
     let mut quick = 0;
     loop {
+        if STOPPING.load(Ordering::SeqCst) {
+            return;
+        }
         let started = Instant::now();
         let ended = match running(&s.path) {
             Some(pid) => wait_for(pid).map(|()| format!("pid {pid}, left by an earlier recovery service, exited")),
@@ -207,6 +244,9 @@ fn supervise(s: &Service, who: &Credentials) -> ! {
             Err(e) => format!("{}: {e:#}", s.path),
         };
         let _ = skyward_sys::kmsg(&line);
+        if STOPPING.load(Ordering::SeqCst) {
+            return;
+        }
         if started.elapsed() < RESTART_DELAY {
             thread::sleep(restart_delay(quick));
             quick = quick.saturating_add(1);

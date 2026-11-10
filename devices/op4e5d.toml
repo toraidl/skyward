@@ -40,6 +40,20 @@ skip = ["hbtp_vm"]
 # the WLAN page joins. The stock recovery leaves both unmounted.
 [partitions]
 mounted = ["metadata", "persist"]
+# ColorOS's script OTA removes and recreates qti_dynamic_partitions. A
+# mounted system partition keeps its device-mapper node busy and makes
+# update_dynamic_partitions abort before it can do that, so never map it.
+# WLAN and the hardware services live on vendor, which stays mounted.
+skip_mount = ["system"]
+
+# The system partition is not mounted, so its build facts are supplied
+# here. These match the installed ColorOS 17 build and the key blob's
+# vendor patch level; they keep Keymaster at the level its key was made for.
+[properties]
+"ro.build.version.release" = "17"
+"ro.build.version.security_patch" = "2026-11-01"
+"ro.vendor.build.security_patch" = "2026-11-01"
+"ro.build.version.ota" = "PEDM00_17.0.1.201(CN01)"
 
 # The phone's hardware services, started in the order they depend on one
 # another: the directory the older kind registers with, the secure world's

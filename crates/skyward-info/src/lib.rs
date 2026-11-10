@@ -197,8 +197,10 @@ impl SystemProps {
 /// earlier ones.
 const PROP_ORDER: [&str; 8] = ["system", "system_ext", "system_dlkm", "vendor", "vendor_dlkm", "odm_dlkm", "odm", "product"];
 
-/// What init names the properties the bootloader passes.
-const BOOT_PROPS: &str = "ro.boot.";
+/// The read-only properties the recovery already has. Bootloader values are
+/// among them; so are values a device configuration supplies when its
+/// installed system is deliberately left unmapped.
+const RO_PROPS: &str = "ro.";
 
 /// The installed system's build properties from its mounted partitions, in
 /// init's order. Partitions init does not list, such as Xiaomi's mi_ext,
@@ -212,7 +214,7 @@ pub fn installed_props(slot: Slot) -> Result<HashMap<String, String>> {
     };
     let mut parts = skyward_vab::mounted_partitions(slot)?;
     parts.sort_by_key(|m| PROP_ORDER.iter().position(|b| *b == base(m)).unwrap_or(PROP_ORDER.len()));
-    let mut props: HashMap<String, String> = skyward_sys::props(BOOT_PROPS).into_iter().collect();
+    let mut props: HashMap<String, String> = skyward_sys::props(RO_PROPS).into_iter().collect();
     for m in &parts {
         let files: &[&str] = match base(m).as_str() {
             "system" => &["system/build.prop"],

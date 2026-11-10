@@ -35,7 +35,7 @@ use std::time::{Duration, Instant};
 /// What runs right before update_engine or an install script starts
 /// writing. Either may write over the installed system's partitions, so
 /// whatever still runs from them has to move off first.
-pub type Detach = Box<dyn FnOnce() -> Result<()> + Send>;
+pub type Detach = Box<dyn FnOnce(bool) -> Result<()> + Send>;
 
 const METADATA: &str = "/metadata";
 
@@ -481,9 +481,9 @@ fn short_of_charge(origin: Origin) -> Result<Option<Refusal>> {
 
 /// Move off the installed system before the first write, where nothing has
 /// yet: rescue may install one package after another.
-fn detach_once(ctx: &mut Context) -> Result<()> {
+fn detach_once(ctx: &mut Context, stop_services: bool) -> Result<()> {
     match ctx.detach.take() {
-        Some(detach) => detach().context("move off the installed system"),
+        Some(detach) => detach(stop_services).context("move off the installed system"),
         None => Ok(()),
     }
 }
@@ -525,7 +525,7 @@ fn update_system(ctx: &mut Context, update: &Update) -> Result<Done> {
     }
     ctx.send(Event::Installing { version });
     let kept = hold(ctx, slot)?;
-    detach_once(ctx)?;
+    detach_once(ctx, false)?;
     // update_engine mounts /metadata itself, as in the stock recovery, keeps
     // the update's state there, and unmounts it when done. The recovery
     // reads the state from it read-only again afterwards.
@@ -804,15 +804,26 @@ fn run_script(ctx: &mut Context, size: u64) -> Result<Done> {
         }
     }
     let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
-    extract_script()?;
+    let script_maps = extract_script()?;
     shell_at_sbin()?;
+    fs::create_dir_all("/tmp/firmware").context("make /tmp/firmware")?;
+    fs::create_dir_all("/tmp/install").context("make /tmp/install")?;
     let kept = hold(ctx, slot)?;
-    detach_once(ctx)?;
+    detach_once(ctx, script_maps)?;
+    let snapshot = skyward_vab::snapshot_state()?;
+    let script_unmapped = script_maps && snapshot == SnapshotState::None;
+    if script_unmapped {
+        skyward_vab::release_script_mappings(slot)?;
+    }
     // While an update is in flight, the slot's partitions in super are its
     // and stay unmapped.
-    let mapped = match skyward_vab::snapshot_state()? {
-        SnapshotState::None => skyward_vab::map_slot(slot)?,
-        state => {
+    let mapped = match (script_unmapped, snapshot) {
+        (true, _) => {
+            let _ = kmsg("install: the script maps the slot's partitions itself");
+            SlotMaps::default()
+        }
+        (false, SnapshotState::None) => skyward_vab::map_slot(slot)?,
+        (false, state) => {
             let _ = kmsg(&format!("install: the slot's partitions stay unmapped while an update is in flight ({state:?})"));
             SlotMaps::default()
         }
@@ -821,6 +832,11 @@ fn run_script(ctx: &mut Context, size: u64) -> Result<Done> {
     let ran = run_binary(ctx);
     if let Err(e) = clean_up(&mounted, &mapped) {
         let _ = kmsg(&format!("install: not all the script left behind was taken away: {e:#}"));
+    }
+    if script_unmapped {
+        if let Err(e) = skyward_vab::release_script_mappings(slot) {
+            let _ = kmsg(&format!("install: the script's partition mappings were left behind: {e:#}"));
+        }
     }
     // What the script wrote over goes back however it ended, and so does
     // the recovery of the slot that starts next, which a package that
@@ -852,7 +868,7 @@ fn verify_signature(ctx: &Context, size: u64) -> Result<Verdict> {
 }
 
 /// Put the zip's install script where it runs from, for anyone to run.
-fn extract_script() -> Result<()> {
+fn extract_script() -> Result<bool> {
     let zip = File::open(fuse::PACKAGE).context("open the package")?;
     let mut zip = zip::ZipArchive::new(BufReader::new(zip)).context("read the zip directory")?;
     let mut script = zip.by_name(package::UPDATE_BINARY).context("open the install script")?;
@@ -863,7 +879,16 @@ fn extract_script() -> Result<()> {
     }
     let mut out = OpenOptions::new().write(true).create_new(true).open(BINARY).with_context(|| format!("make {BINARY}"))?;
     io::copy(&mut script, &mut out).with_context(|| format!("write {BINARY}"))?;
+    drop(script);
     out.set_permissions(fs::Permissions::from_mode(0o755)).with_context(|| format!("make {BINARY} runnable"))
+    ?;
+    let mut maps = false;
+    if let Ok(mut updater) = zip.by_name("META-INF/com/google/android/updater-script") {
+        let mut text = String::new();
+        updater.read_to_string(&mut text).context("read the updater script")?;
+        maps = text.contains("update_dynamic_partitions") || text.contains("map_partition(");
+    }
+    Ok(maps)
 }
 
 /// Give scripts written for other recoveries the shell they start with.
