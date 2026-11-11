@@ -201,3 +201,59 @@ before the updater and are a separate, pre-run failure. The source follow-up
 waits for adbd's FunctionFS readiness before reordering MTP/ADB configfs links
 and retries bounded `EEXIST`, `EBUSY`, and `ENODEV` races. It is host-tested and
 built, but not yet deployed on the phone.
+
+## REA trace of the 5 GiB ZIP64 member (2026-11-11)
+
+The original `my_stock.new.dat` entry is DEFLATE, with uncompressed size
+`5,011,189,760` bytes and compressed size `4,173,225,454` bytes. Its central
+directory's 32-bit uncompressed-size field is `0xffffffff`; the ZIP64 extra
+field carries the real 64-bit size. The v4 `my_stock.transfer.list` declares
+`1,223,435` 4 KiB blocks and contains 1,195 `new` ranges. Those blocks account
+for exactly `5,011,189,760` bytes; `my_stock.patch.dat` is empty. Applying this
+partition therefore needs the complete decompressed member.
+
+REA traced the updater binary with SHA-256
+`6f1a8079a8c9b0b65b99f5d78298828d9329aeddd923f03ea8d5ec4d20b312ee`:
+
+1. `PerformBlockImageUpdate` (`0x2a9848`) starts `unzip_new_data`
+   (`0x2b4b98`) as a worker.
+2. `unzip_new_data` passes its `ZipEntry` to `ProcessZipEntryContents`
+   (`0x32a60c`), which calls `ExtractToWriter` (`0x32a09c`).
+3. `ExtractToWriter` passes 32-bit compressed and uncompressed sizes from the
+   `ZipEntry` to `Inflate` (`0x329d08`). For this entry, the uncompressed size
+   supplied by `FindEntry` is the ZIP64 sentinel `0xffffffff`.
+4. `Inflate` continues feeding output to its writer until the DEFLATE stream
+   ends, then checks the accumulated output size against that 32-bit value and
+   returns a size-mismatch error. `ProcessZipEntryContents` discards
+   `ExtractToWriter`'s result, and `unzip_new_data` also discards that helper's
+   result. The `receive_new_data` callback writes each produced chunk to the
+   block-image range writer.
+
+This explains how the same embedded updater can report a post-inflate size
+mismatch while still feeding the full data stream to `block_image_update`.
+The 32-bit size limitation affects extraction paths that propagate this
+error, but REA does not show it aborting the block-image worker path used for
+`my_stock.new.dat`. This is consistent with the user's report that OrangeFox
+completed the same OTA and with Skyward logs that show the script returned
+status 0. Those facts do not independently verify the resulting partition
+contents or a successful boot.
+
+The earlier `physical-test-3` only read the member's compressed byte range to
+`/dev/null`; it did not inflate the 5 GiB output. The OrangeFox log captured in
+this session is also only for a 305-byte no-op ZIP. No full OTA was started in
+this follow-up. The ZIP64 size mismatch is therefore a real parser limitation,
+but it is not supported as the cause of the reported Skyward install failure.
+
+The specific observed Skyward failure remains USB gadget handback after the
+updater returned status 0: MTP configfs link creation reported `EEXIST` or
+`ENODEV`. Commit `3ddd6a0` adds readiness checks and bounded retries for those
+transient states. Its recovery image is
+`/home/bruce/skyward-work/out/skyward-op4e5d-20261111-usb-fix.img`, SHA-256
+`cb89d92b01711fdff96469f96239e9a10f609eb9e31b13915d1af5905c111dba`; it has
+not been booted on the device. The phone is currently reported in recovery,
+but neither ADB nor fastboot enumerated serial `7f95dee9` after a reboot
+command, so live validation is pending.
+
+REA evidence export: `/home/bruce/skyward-work/zip64-diag/rea-evidence-20261111-final.json`
+(53 records, 12,202,242 bytes). Snapshot:
+`/home/bruce/skyward-work/zip64-diag/rea-snapshot-20261111-final.json`.
