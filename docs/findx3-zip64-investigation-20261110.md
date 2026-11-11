@@ -9,13 +9,17 @@ The package's updater supports ZIP64, with a defective extra-field parser.
 That defect explains the synthetic package's `bad LFH offset` failure. It
 does **not** explain the original OTA's SIGBUS: a read-only probe retaining
 that OTA's size and directory layout succeeds both locally and through FUSE.
-The remaining original-install failure needs a trace of its first failed read
-and the child process's fault location.
+The earlier SIGBUS occurrence remains unexplained and needs a trace of its
+first failed read and the child process's fault location. Later saved logs
+show three separate attempts of this OTA returning script status 0 before
+failing during USB handback; that is a distinct failure path.
 
-No system partition was written, and no recovery image was flashed, during
-these experiments. Probe files and native diagnostic executables were placed
-in `/tmp`; the source OTA was not modified. A sparse probe is a diagnostic
-artifact, not an installable replacement OTA or an integrity-verified package.
+During the original ZIP/updater experiments, no system partition was written
+or recovery image flashed. The later OrangeFox follow-up below did flash the
+recovery partition after backing it up. Probe files and native diagnostic
+executables were placed in `/tmp`; the source OTA was not modified. A sparse
+probe is a diagnostic artifact, not an installable replacement OTA or an
+integrity-verified package.
 
 ## Artifact identity
 
@@ -157,3 +161,43 @@ Proceed in this order:
 Local diagnostic artifacts from this session live under
 `/home/bruce/skyward-work/zip64-diag/` (`local-comparison.log`, `tunnel.log`,
 `usb-diag.log`, sparse probe, Cargo project). They are not recovery build inputs.
+
+## Follow-up (2026-11-11)
+
+The user confirmed that this exact OTA completed installation in OrangeFox.
+The OrangeFox `recovery.img` in `~/coloros_port/devices/OP4E5D/` was an older
+TWRP image. The latest OP4E5D OrangeFox build is
+`~/ofox_12.1/out/target/product/OP4E5D/recovery.img`, product `ofox_OP4E5D`,
+dated 2026-10-15. It was written to the 128 MiB `recovery` partition after
+backing up the prior bytes; the post-write readback matched SHA-256
+`af90570c0cd22bcb5d51d5c96e881f68b6379c4f79bee31124a96e7baeed984b`.
+The phone booted the image as `fox_OP4E5D` (OrangeFox R12.0).
+
+A 305-byte unsigned test ZIP containing only a no-op update-binary was sent
+with `adb sideload` to serial `7f95dee9`. The host reported `Total xfer: 1.00x`.
+This validates USB sideload transport on this OrangeFox build without writing
+phone partitions. The captured OrangeFox log at
+`~/skyward-work/out/op4e5d-orangefox-sideload-noop.log` records the 305-byte
+input, the `Skyward OrangeFox sideload transport check` marker, `Process ended
+with no errors`, and `Install took 1 second(s)`; its SHA-256 is
+`55c670c11634a824cd61456482a8b89154c82abc61160062e02fa0ea1a0dc78e`. This
+proves transport and updater launch for the no-op package, not completion of
+the 8.93 GB OTA through OrangeFox. The user reports that the full OTA completed
+there, but that installation log was not captured in this session.
+
+The saved Skyward recovery log also contains three attempts offering the full
+8,931,218,810-byte OTA. Each ends with `install: Ran { wipe_cache: false }`.
+In the matching source, `Outcome::Ran` is emitted only when the update script
+returns code 0. All three then fail to restore the resting USB gadget: one
+reports `name the MTP function: File exists`, and two report
+`give the port its configuration: No such device`. This does not prove the
+resulting partitions boot correctly, but it moves the observed failure after
+the updater's zero exit and into USB handback. Do not attribute these runs to
+the synthetic ZIP64 offset defect.
+
+OrangeFox's install path also unmounts `/vendor` before running the package
+updater by default. Skyward's earlier `vendor stayed busy` attempts failed
+before the updater and are a separate, pre-run failure. The source follow-up
+waits for adbd's FunctionFS readiness before reordering MTP/ADB configfs links
+and retries bounded `EEXIST`, `EBUSY`, and `ENODEV` races. It is host-tested and
+built, but not yet deployed on the phone.
