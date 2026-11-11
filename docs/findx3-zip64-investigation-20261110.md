@@ -257,3 +257,34 @@ command, so live validation is pending.
 REA evidence export: `/home/bruce/skyward-work/zip64-diag/rea-evidence-20261111-final.json`
 (53 records, 12,202,242 bytes). Snapshot:
 `/home/bruce/skyward-work/zip64-diag/rea-snapshot-20261111-final.json`.
+
+## USB handback correction and rebuilt image (2026-11-11)
+
+The post-probe recovery log ended with a Skyward MTP/ADB handback timeout,
+but live configfs readback showed that the gadget had in fact returned to
+`mtp,adb`: `configs/b.1/f1` pointed to `functions/mtp.gs0`, `f2` pointed to
+`functions/ffs.adb`, `init.svc.adbd=running`, and `sys.usb.ffs.ready=1`.
+OP4E5D's init uses `mtp.gs0`; the prior Skyward implementation incorrectly
+required `f1` to point to `ffs.mtp`, then rewrote init-owned configfs links and
+reported failure when they did not match. This is a validator/ownership bug,
+not evidence that the device failed to restore USB. The same no-op sideload
+log shows the 8,931,218,810-byte ZIP was offered, its install script ran, and
+the USB gadget was unbound and handed back. Because the ZIP script did no
+payload extraction or partition write, this does not verify a full OTA.
+
+`crates/skyward-sys/src/usb.rs` now lets init select the MTP function and
+waits for adbd running, FunctionFS readiness, and `sys.usb.state=mtp,adb`;
+it no longer edits configfs links itself. `cargo test --locked -p skyward-sys`
+passes all 35 tests. The OP4E5D image rebuilt successfully and was checked as
+an Android boot image; the packer listing includes the recovery init, adbd,
+and update_engine_sideload runtime. Image:
+`/home/bruce/skyward-work/out/skyward-op4e5d-20261111-usb-mtp-handback.img`,
+SHA-256 `1c55263448cc0192daee5f884ec19cfc2bf402e362eab29cb1b27e1fa9376f7f`.
+It has not yet been booted. At the end of this build the selected USB serial
+`7f95dee9` was in recovery with `mtp,adb`, adbd running, and FunctionFS ready.
+The only remaining validation here is a temporary fastboot boot followed by
+the same read-only sideload probe and inspection of the post-install USB
+state. No recovery partition write or full OTA was performed.
+
+`cargo fmt --all -- --check` could not run because rustfmt is not installed
+for the configured toolchain; no toolchain components were installed.
