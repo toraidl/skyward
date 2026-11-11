@@ -280,11 +280,29 @@ an Android boot image; the packer listing includes the recovery init, adbd,
 and update_engine_sideload runtime. Image:
 `/home/bruce/skyward-work/out/skyward-op4e5d-20261111-usb-mtp-handback.img`,
 SHA-256 `1c55263448cc0192daee5f884ec19cfc2bf402e362eab29cb1b27e1fa9376f7f`.
-It has not yet been booted. At the end of this build the selected USB serial
-`7f95dee9` was in recovery with `mtp,adb`, adbd running, and FunctionFS ready.
-The only remaining validation here is a temporary fastboot boot followed by
-the same read-only sideload probe and inspection of the post-install USB
-state. No recovery partition write or full OTA was performed.
+After verifying fastboot serial `7f95dee9`, product `kona`, and
+`is-userspace: no`, the image was started with `fastboot boot` (no partition
+write). The runtime identified as `OP4E5D 0.1.2 recovery up`, initially with
+`mtp,adb`, adbd running, and FunctionFS ready.
+
+The same no-op ZIP was then sideloaded. Host `adb sideload` returned
+`Total xfer: 0.00x`; the recovery log records sideload USB bound/enabled,
+the 8,931,218,810-byte ZIP offer and install-script detection, followed by
+sideload USB disabled/unbound and `install: Ran { wipe_cache: false }`.
+Afterward serial `7f95dee9` immediately enumerated as recovery over USB;
+`sys.usb.config` and `sys.usb.state` were `mtp,adb`, `init.svc.adbd` was
+`running`, `sys.usb.ffs.ready` was `1`, and configfs links remained
+`mtp.gs0` plus `ffs.adb`. No MTP/ADB timeout occurred. This verifies the
+USB-mode handback path with the read-only no-op package. The host's zero
+transfer result and no-op updater mean this does not validate transfer,
+inflation, or installation of the full 8.93 GB OTA; no recovery partition
+write or full OTA was performed.
+
+Captured runtime log:
+`/home/bruce/skyward-work/out/op4e5d-skyward-usb-mtp-handback-runtime.log`,
+SHA-256 `fa2b3c47f4ae169194ed9ef57443355302a55b9db153b4813a9184f992d3ad0a`.
+The live USB handback fix is verified for this no-op sideload flow; a full
+OTA run remains unverified.
 
 `cargo fmt --all -- --check` could not run because rustfmt is not installed
 for the configured toolchain; no toolchain components were installed.
