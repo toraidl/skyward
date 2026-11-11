@@ -5,14 +5,21 @@
 Device: Find X3 / OP4E5D, USB serial `7f95dee9`, in recovery. Source baseline:
 `4888cec`. These observations do not establish OnePlus 8T behavior.
 
-The package's updater supports ZIP64, with a defective extra-field parser.
-That defect explains the synthetic package's `bad LFH offset` failure. It
-does **not** explain the original OTA's SIGBUS: a read-only probe retaining
-that OTA's size and directory layout succeeds both locally and through FUSE.
-The earlier SIGBUS occurrence remains unexplained and needs a trace of its
-first failed read and the child process's fault location. Later saved logs
-show three separate attempts of this OTA returning script status 0 before
-failing during USB handback; that is a distinct failure path.
+The proprietary updater contains a ZIP64 extra-field offset bug demonstrated
+with a synthetic archive. The original OTA orders its ZIP64 offset field first,
+so that specific bug does not explain the original-layout probe results. REA
+also found that `my_stock.new.dat` has a ZIP64 size sentinel which is passed to
+a 32-bit inflater check. The block-image worker still receives the inflater's
+output chunks, and saved full-OTA attempts returned script status 0; REA does
+not establish that the size mismatch aborts this package's update path.
+
+The observed Skyward “install failure” in saved full-OTA runs was logged after
+the updater returned status 0, during USB handback. Live configfs readback
+later showed that init had restored a valid OP4E5D gadget (`mtp.gs0` plus
+`ffs.adb`); previous Skyward code incorrectly required `ffs.mtp` and reported
+a false failure. That handback bug is fixed and its no-op sideload path is
+verified on device. A full OTA has not been rerun, so partition contents and
+post-OTA boot remain unverified.
 
 During the original ZIP/updater experiments, no system partition was written
 or recovery image flashed. The later OrangeFox follow-up below did flash the
@@ -31,8 +38,10 @@ integrity-verified package.
 - update-binary SHA-256:
   `6f1a8079a8c9b0b65b99f5d78298828d9329aeddd923f03ea8d5ec4d20b312ee`.
 
-The updater hash identifies the parser discussed here. The package has not
-undergone a full payload CRC/signature verification in this investigation.
+The updater hash identifies the parser discussed here. Host `unzip -tq` read
+the complete original OTA and reported no compressed-data/CRC errors. This
+checks ZIP member integrity; it does not verify the package signature or
+successful application to device partitions.
 
 ## Confirmed extra-field parser defect
 
@@ -97,13 +106,15 @@ this script executed, not that the payload can be installed.
 | Same probe through current Skyward FUSE, local source, cold cache | probe printed, exit 0; no source fault |
 | FUSE reads around 2 GiB, 4 GiB and EOF | `pread` and private `mmap` equal local bytes; child exits 0 |
 | Host `adb sideload` over a forwarded diagnostic ADB stream, then the same Connection/FUSE/updater | probe printed, updater exits 0; `finish=Ok(())` |
-| Physical FunctionFS sideload of the probe | not completed; see USB boundary below |
-| Original OTA through full installation | still unresolved; earlier log records SIGBUS |
+| Physical FunctionFS sideload of the original-layout no-op probe | script returned 0 and USB handback succeeded after the fix; host reported `Total xfer: 0.00x`, so this is not full-payload validation |
+| Full host `unzip -tq` over the original OTA | all compressed members passed ZIP CRC checks |
+| Original OTA through full installation | not rerun after the USB fix; saved pre-fix runs returned script status 0, but partition contents and boot were not verified |
 
 The forwarded case uses the real host `adb sideload`, Skyward's `adb::Connection`
 and FUSE server. It bypasses the recovery's FunctionFS endpoint implementation
-and gadget transition. It therefore does not validate the physical sideload
-USB path. All these cases also bypass the full installation's service teardown.
+and gadget transition. The later physical no-op case validates sideload entry
+and handback, but its zero host transfer result and no-op script do not validate
+reading or installing the full OTA payload.
 
 ## USB boundary
 
@@ -118,7 +129,7 @@ The user restored connectivity. The same recovery boot remained running;
 USB ADB was verified again as serial `7f95dee9`, with `sys.usb.state=mtp,adb`.
 The temporary forwarded ADB connection and port mapping were removed.
 
-## Diagnostic changes and next repair steps
+## Diagnostic changes and remaining scope
 
 This commit adds diagnostics without changing transfer or ZIP handling:
 
@@ -130,33 +141,25 @@ This commit adds diagnostics without changing transfer or ZIP handling:
 - Record FunctionFS bind, unbind, enable, disable, suspend and resume events to
   correlate USB transitions with the failed read.
 
-The changes require building and deploying a recovery before they can explain
-another physical sideload failure. This investigation has not deployed them.
-Validation: `cargo test -p skyward-install --locked` passes all 68 tests, and
-`cargo ndk -t arm64-v8a --platform 30 check --release -p skyward-install --locked`
-passes. `git diff --check` passes. A rustfmt check was unavailable because the
-installed stable toolchain has no rustfmt component.
+The USB source change has since been built and deployed by temporary
+`fastboot boot`; the physical no-op sideload confirmed USB handback. The source
+removes the custom configfs link rewrite and waits for init's adbd, FunctionFS,
+and USB-state properties. `cargo test --locked -p skyward-sys` passes all 35
+tests. `cargo fmt --all -- --check` is unavailable because rustfmt is not
+installed for the configured toolchain.
 
-Proceed in this order:
+The ZIP64 defects are properties of the OTA's proprietary `update-binary`,
+which is supplied by the package and is not built from this repository.
+Replacing or patching it would require preserving Oplus-specific updater
+behavior and validating a modified package. The original OTA uses
+`block_image_update` for `my_stock.new.dat`, and saved runs report script status
+0; available evidence does not justify changing that binary as the fix for the
+observed Skyward failure.
 
-1. Run the original-layout read-only probe through the recovery-owned sideload
-   path. Avoid launching a gadget-switching diagnostic under adbd. Preserve
-   existing logs before retrying; do not use the real writing script yet.
-2. If it fails, collect the new FUSE fault and USB transition lines together
-   with the script log. Capture SIGBUS `si_code`, fault address, PC and memory
-   mappings with a scoped native trace. Relate the fault address to the package
-   mapping's file offset, and compare those bytes with the host archive.
-3. A USB disable/shutdown preceding a failed block points to gadget/FunctionFS
-   ownership or teardown. A protocol error points to the transfer implementation.
-   A fault with correct file bytes and no source error points back to updater
-   parsing/mapping. Each requires a different fix.
-4. For the confirmed extra-field defect, prefer fixing/rebuilding the updater's
-   ZIP64 parser with bounded field traversal while retaining its Oplus-specific
-   functions. Reordering fields can demonstrate or work around the defect in a
-   newly built package, but changes signed bytes and needs package re-signing;
-   it is not a transparent repair of an existing signed OTA.
-5. Validate the physical read-only case before a real OTA. Full OTA acceptance
-   still requires successful writing, cleanup and boot; none is proved here.
+Full OTA acceptance still needs a separate run of the real package followed
+by partition and boot verification. Its updater script writes boot, vbmeta,
+firmware, and dynamic partitions, so live validation here used a read-only
+no-op package only.
 
 Local diagnostic artifacts from this session live under
 `/home/bruce/skyward-work/zip64-diag/` (`local-comparison.log`, `tunnel.log`,
@@ -185,22 +188,22 @@ proves transport and updater launch for the no-op package, not completion of
 the 8.93 GB OTA through OrangeFox. The user reports that the full OTA completed
 there, but that installation log was not captured in this session.
 
-The saved Skyward recovery log also contains three attempts offering the full
-8,931,218,810-byte OTA. Each ends with `install: Ran { wipe_cache: false }`.
-In the matching source, `Outcome::Ran` is emitted only when the update script
-returns code 0. All three then fail to restore the resting USB gadget: one
-reports `name the MTP function: File exists`, and two report
-`give the port its configuration: No such device`. This does not prove the
-resulting partitions boot correctly, but it moves the observed failure after
-the updater's zero exit and into USB handback. Do not attribute these runs to
-the synthetic ZIP64 offset defect.
+The saved Skyward recovery log contains three attempts offering the full
+8,931,218,810-byte OTA. Each ends with `install: Ran { wipe_cache: false }`;
+the matching source emits `Outcome::Ran` only when the update script returns
+code 0. The old post-script USB code then reported either `name the MTP
+function: File exists` or `give the port its configuration: No such device`.
+Subsequent configfs readback established that OP4E5D uses `mtp.gs0`, not the
+hardcoded `ffs.mtp` link the code expected. These messages identify a faulty
+handback path, not a proven OTA partition failure. They do not prove partition
+contents or a successful boot.
 
 OrangeFox's install path also unmounts `/vendor` before running the package
 updater by default. Skyward's earlier `vendor stayed busy` attempts failed
-before the updater and are a separate, pre-run failure. The source follow-up
-waits for adbd's FunctionFS readiness before reordering MTP/ADB configfs links
-and retries bounded `EEXIST`, `EBUSY`, and `ENODEV` races. It is host-tested and
-built, but not yet deployed on the phone.
+before the updater and are a separate, pre-run failure. The first source
+follow-up attempted to reorder MTP/ADB configfs links. Live readback showed
+that approach was wrong for OP4E5D; commit `9dd969f` removes it and leaves link
+ownership with init.
 
 ## REA trace of the 5 GiB ZIP64 member (2026-11-11)
 
@@ -244,15 +247,9 @@ this session is also only for a 305-byte no-op ZIP. No full OTA was started in
 this follow-up. The ZIP64 size mismatch is therefore a real parser limitation,
 but it is not supported as the cause of the reported Skyward install failure.
 
-The specific observed Skyward failure remains USB gadget handback after the
-updater returned status 0: MTP configfs link creation reported `EEXIST` or
-`ENODEV`. Commit `3ddd6a0` adds readiness checks and bounded retries for those
-transient states. Its recovery image is
-`/home/bruce/skyward-work/out/skyward-op4e5d-20261111-usb-fix.img`, SHA-256
-`cb89d92b01711fdff96469f96239e9a10f609eb9e31b13915d1af5905c111dba`; it has
-not been booted on the device. The phone is currently reported in recovery,
-but neither ADB nor fastboot enumerated serial `7f95dee9` after a reboot
-command, so live validation is pending.
+At the time of this REA trace, the USB handback cause had not been identified.
+The following section records the later configfs evidence, code correction,
+and live no-op retest.
 
 REA evidence export: `/home/bruce/skyward-work/zip64-diag/rea-evidence-20261111-final.json`
 (53 records, 12,202,242 bytes). Snapshot:
